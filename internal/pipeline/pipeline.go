@@ -78,7 +78,7 @@ func Sync(ctx context.Context, opts SyncOptions) ([]SyncResult, error) {
 	defer st.Close()
 
 	mdChunker := chunker.NewMarkdownChunker(chunker.DefaultOptions())
-	codeChunker := chunker.NewLineChunker(chunker.DefaultOptions())
+	codeChunker := chunker.NewCodeChunker(chunker.DefaultOptions())
 	fetcher := &fetchers.GitHubFetcher{}
 
 	return syncAll(ctx, m, lf, st, emb, fetcher, mdChunker, codeChunker, opts)
