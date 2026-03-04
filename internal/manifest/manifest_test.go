@@ -1,6 +1,8 @@
 package manifest
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -213,5 +215,172 @@ ref = "v1.0.0"
 				tt.check(t, m)
 			}
 		})
+	}
+}
+
+func TestParseFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "mycelium.toml")
+
+	content := `[config]
+embedding_model = "voyage-code-2"
+
+[[dependencies]]
+id = "example"
+source = "github.com/example/repo"
+ref = "v1.0.0"
+docs = ["docs/"]
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write temp file: %v", err)
+	}
+
+	m, err := ParseFile(path)
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+	if m.Config.EmbeddingModel != "voyage-code-2" {
+		t.Errorf("embedding_model = %q, want %q", m.Config.EmbeddingModel, "voyage-code-2")
+	}
+	if len(m.Dependencies) != 1 {
+		t.Fatalf("dependencies len = %d, want 1", len(m.Dependencies))
+	}
+	if m.Dependencies[0].ID != "example" {
+		t.Errorf("dep.id = %q, want %q", m.Dependencies[0].ID, "example")
+	}
+}
+
+func TestParseFile_NotFound(t *testing.T) {
+	_, err := ParseFile(filepath.Join(t.TempDir(), "nonexistent.toml"))
+	if err == nil {
+		t.Fatal("expected error for non-existent file, got nil")
+	}
+	if !strings.Contains(err.Error(), "open manifest") {
+		t.Errorf("error = %q, want containing %q", err.Error(), "open manifest")
+	}
+}
+
+func TestWriteFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "mycelium.toml")
+
+	m := &Manifest{
+		Config: Config{EmbeddingModel: "text-embedding-3-small"},
+		Dependencies: []Dependency{
+			{
+				ID:     "mylib",
+				Source: "github.com/org/mylib",
+				Ref:    "v2.0.0",
+				Docs:   []string{"docs/"},
+			},
+		},
+	}
+
+	if err := m.WriteFile(path); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	got, err := ParseFile(path)
+	if err != nil {
+		t.Fatalf("ParseFile after WriteFile: %v", err)
+	}
+	if got.Config.EmbeddingModel != "text-embedding-3-small" {
+		t.Errorf("embedding_model = %q, want %q", got.Config.EmbeddingModel, "text-embedding-3-small")
+	}
+	if len(got.Dependencies) != 1 {
+		t.Fatalf("dependencies len = %d, want 1", len(got.Dependencies))
+	}
+	dep := got.Dependencies[0]
+	if dep.ID != "mylib" || dep.Source != "github.com/org/mylib" || dep.Ref != "v2.0.0" {
+		t.Errorf("dep = %+v, want id=mylib source=github.com/org/mylib ref=v2.0.0", dep)
+	}
+}
+
+func TestWriteFileRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "mycelium.toml")
+
+	original := &Manifest{
+		Config: Config{
+			EmbeddingModel: "voyage-code-2",
+			Publish:        "github-releases",
+		},
+		Local: Local{
+			Index:   []string{"./docs", "./README.md"},
+			Private: []string{"./notes"},
+		},
+		Dependencies: []Dependency{
+			{
+				ID:             "envoy-gateway",
+				Source:         "github.com/envoyproxy/gateway",
+				Ref:            "v1.3.0",
+				Docs:           []string{"site/content"},
+				Code:           []string{"api/v1alpha1"},
+				CodeExtensions: []string{".go"},
+			},
+			{
+				ID:     "platform-sdk",
+				Source: "github.example.com/platform/sdk",
+				Ref:    "v4.2.0",
+				Docs:   []string{"docs/", "api-reference/"},
+				Code:   []string{"pkg/client", "pkg/types"},
+			},
+		},
+	}
+
+	if err := original.WriteFile(path); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	got, err := ParseFile(path)
+	if err != nil {
+		t.Fatalf("ParseFile after WriteFile: %v", err)
+	}
+
+	// Config
+	if got.Config.EmbeddingModel != original.Config.EmbeddingModel {
+		t.Errorf("embedding_model = %q, want %q", got.Config.EmbeddingModel, original.Config.EmbeddingModel)
+	}
+	if got.Config.Publish != original.Config.Publish {
+		t.Errorf("publish = %q, want %q", got.Config.Publish, original.Config.Publish)
+	}
+
+	// Local
+	if len(got.Local.Index) != len(original.Local.Index) {
+		t.Errorf("local.index len = %d, want %d", len(got.Local.Index), len(original.Local.Index))
+	}
+	for i, v := range original.Local.Index {
+		if i < len(got.Local.Index) && got.Local.Index[i] != v {
+			t.Errorf("local.index[%d] = %q, want %q", i, got.Local.Index[i], v)
+		}
+	}
+	if len(got.Local.Private) != len(original.Local.Private) {
+		t.Errorf("local.private len = %d, want %d", len(got.Local.Private), len(original.Local.Private))
+	}
+
+	// Dependencies
+	if len(got.Dependencies) != len(original.Dependencies) {
+		t.Fatalf("dependencies len = %d, want %d", len(got.Dependencies), len(original.Dependencies))
+	}
+	for i, want := range original.Dependencies {
+		dep := got.Dependencies[i]
+		if dep.ID != want.ID {
+			t.Errorf("dep[%d].id = %q, want %q", i, dep.ID, want.ID)
+		}
+		if dep.Source != want.Source {
+			t.Errorf("dep[%d].source = %q, want %q", i, dep.Source, want.Source)
+		}
+		if dep.Ref != want.Ref {
+			t.Errorf("dep[%d].ref = %q, want %q", i, dep.Ref, want.Ref)
+		}
+		if len(dep.Docs) != len(want.Docs) {
+			t.Errorf("dep[%d].docs len = %d, want %d", i, len(dep.Docs), len(want.Docs))
+		}
+		if len(dep.Code) != len(want.Code) {
+			t.Errorf("dep[%d].code len = %d, want %d", i, len(dep.Code), len(want.Code))
+		}
+		if len(dep.CodeExtensions) != len(want.CodeExtensions) {
+			t.Errorf("dep[%d].code_extensions len = %d, want %d", i, len(dep.CodeExtensions), len(want.CodeExtensions))
+		}
 	}
 }

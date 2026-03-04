@@ -3,6 +3,9 @@ package store
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -338,5 +341,173 @@ func TestCombinedFilters(t *testing.T) {
 		if r.Chunk.ChunkType != "code" {
 			t.Errorf("expected chunkType 'code', got %q", r.Chunk.ChunkType)
 		}
+	}
+}
+
+func TestDefaultStorePath(t *testing.T) {
+	t.Run("env var override", func(t *testing.T) {
+		t.Setenv("MYCELIUM_STORE_DIR", "/custom/path")
+		got := DefaultStorePath()
+		if got != "/custom/path" {
+			t.Errorf("expected /custom/path, got %q", got)
+		}
+	})
+
+	t.Run("default without env var", func(t *testing.T) {
+		t.Setenv("MYCELIUM_STORE_DIR", "")
+		got := DefaultStorePath()
+		home, err := os.UserHomeDir()
+		if err != nil {
+			t.Fatalf("UserHomeDir: %v", err)
+		}
+		want := filepath.Join(home, ".mycelium", "store")
+		if got != want {
+			t.Errorf("expected %q, got %q", want, got)
+		}
+	})
+}
+
+func TestNewLanceDBStore_ZeroDimensions(t *testing.T) {
+	ctx := context.Background()
+	dbPath := t.TempDir()
+
+	_, err := NewLanceDBStore(ctx, dbPath, 0)
+	if err == nil {
+		t.Fatal("expected error when dimensions=0 and table does not exist")
+	}
+	if !strings.Contains(err.Error(), "does not exist") {
+		t.Errorf("expected error containing 'does not exist', got %q", err.Error())
+	}
+}
+
+func TestNewLanceDBStore_OpenExisting(t *testing.T) {
+	ctx := context.Background()
+	dbPath := t.TempDir()
+
+	// Create the store with known dimensions.
+	store1, err := NewLanceDBStore(ctx, dbPath, 4)
+	if err != nil {
+		t.Fatalf("first NewLanceDBStore: %v", err)
+	}
+	// Insert a chunk so the table is non-empty.
+	chunks := makeLanceChunks("key-open", 1, "doc", "dep", "v1.0.0", "")
+	if err := store1.Upsert(ctx, "key-open", chunks); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+	if err := store1.Close(); err != nil {
+		t.Fatalf("Close first store: %v", err)
+	}
+
+	// Reopen with dimensions=0 — should succeed because the table already exists.
+	store2, err := NewLanceDBStore(ctx, dbPath, 0)
+	if err != nil {
+		t.Fatalf("second NewLanceDBStore with dims=0: %v", err)
+	}
+	defer store2.Close()
+
+	has, err := store2.HasKey(ctx, "key-open")
+	if err != nil {
+		t.Fatalf("HasKey on reopened store: %v", err)
+	}
+	if !has {
+		t.Error("expected HasKey true on reopened store")
+	}
+}
+
+func TestMapInt_Types(t *testing.T) {
+	tests := []struct {
+		name string
+		val  interface{}
+		want int
+	}{
+		{"int", int(42), 42},
+		{"int32", int32(32), 32},
+		{"int64", int64(64), 64},
+		{"float64", float64(3.14), 3},
+		{"float32", float32(2.71), 2},
+		{"nil", nil, 0},
+		{"string", "notanumber", 0},
+		{"missing key", nil, 0},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			m := map[string]interface{}{"k": tc.val}
+			got := mapInt(m, "k")
+			if got != tc.want {
+				t.Errorf("mapInt(%T(%v)) = %d, want %d", tc.val, tc.val, got, tc.want)
+			}
+		})
+	}
+
+	// Test missing key separately.
+	t.Run("key absent", func(t *testing.T) {
+		m := map[string]interface{}{"other": 99}
+		got := mapInt(m, "missing")
+		if got != 0 {
+			t.Errorf("mapInt missing key = %d, want 0", got)
+		}
+	})
+}
+
+func TestToFloat32_Types(t *testing.T) {
+	tests := []struct {
+		name string
+		val  interface{}
+		want float32
+	}{
+		{"float32", float32(1.5), 1.5},
+		{"float64", float64(2.5), 2.5},
+		{"string", "notafloat", 0},
+		{"nil", nil, 0},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := toFloat32(tc.val)
+			if got != tc.want {
+				t.Errorf("toFloat32(%T(%v)) = %f, want %f", tc.val, tc.val, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestUpsertEmpty(t *testing.T) {
+	ls := newTestLanceStore(t)
+	ctx := context.Background()
+
+	// Upsert with an empty slice should not error.
+	if err := ls.Upsert(ctx, "key-empty", nil); err != nil {
+		t.Fatalf("Upsert empty: %v", err)
+	}
+
+	has, err := ls.HasKey(ctx, "key-empty")
+	if err != nil {
+		t.Fatalf("HasKey after empty upsert: %v", err)
+	}
+	if has {
+		t.Error("expected HasKey false after empty upsert")
+	}
+
+	// Also test with a non-nil empty slice.
+	if err := ls.Upsert(ctx, "key-empty2", []StoredChunk{}); err != nil {
+		t.Fatalf("Upsert empty slice: %v", err)
+	}
+
+	has, err = ls.HasKey(ctx, "key-empty2")
+	if err != nil {
+		t.Fatalf("HasKey after empty slice upsert: %v", err)
+	}
+	if has {
+		t.Error("expected HasKey false after empty slice upsert")
+	}
+}
+
+func TestClose_NilFields(t *testing.T) {
+	// Test Close with nil table and nil conn — should not panic and return nil.
+	ls := &LanceDBStore{
+		conn:  nil,
+		table: nil,
+	}
+	if err := ls.Close(); err != nil {
+		t.Errorf("Close on nil fields returned error: %v", err)
 	}
 }

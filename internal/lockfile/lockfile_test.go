@@ -256,3 +256,179 @@ func TestAtomicWriteNoPartial(t *testing.T) {
 		t.Error("original file should still contain 'original' source")
 	}
 }
+
+func TestReadFile_NotFound(t *testing.T) {
+	_, err := ReadFile(filepath.Join(t.TempDir(), "does-not-exist.lock"))
+	if err == nil {
+		t.Fatal("expected error for non-existent file")
+	}
+	if !strings.Contains(err.Error(), "open lockfile") {
+		t.Errorf("error = %q, want it to contain %q", err, "open lockfile")
+	}
+}
+
+func TestRead_InvalidTOML(t *testing.T) {
+	malformed := `[meta
+this is not valid toml !!!
+`
+	_, err := Read(strings.NewReader(malformed))
+	if err == nil {
+		t.Fatal("expected error for invalid TOML")
+	}
+	if !strings.Contains(err.Error(), "decode lockfile") {
+		t.Errorf("error = %q, want it to contain %q", err, "decode lockfile")
+	}
+}
+
+func TestRemoveSource_NonExistent(t *testing.T) {
+	lf := New()
+	lf.SetSource("keep", SourceLock{ContentHash: "sha256:k", StoreKey: "sha256:k", IngestionType: "built"})
+
+	// Removing a key that doesn't exist should be a no-op.
+	lf.RemoveSource("ghost")
+
+	if len(lf.Sources) != 1 {
+		t.Fatalf("sources len = %d, want 1", len(lf.Sources))
+	}
+	if _, ok := lf.Sources["keep"]; !ok {
+		t.Error("expected source 'keep' to still exist")
+	}
+}
+
+func TestSetSource_NilMap(t *testing.T) {
+	// Directly construct a Lockfile with nil Sources to exercise the lazy-init path.
+	lf := &Lockfile{}
+	if lf.Sources != nil {
+		t.Fatal("precondition: Sources should be nil")
+	}
+
+	lf.SetSource("first", SourceLock{
+		ContentHash:   "sha256:aaa",
+		StoreKey:      "sha256:bbb",
+		IngestionType: "built",
+	})
+
+	if lf.Sources == nil {
+		t.Fatal("Sources should have been initialized")
+	}
+	if len(lf.Sources) != 1 {
+		t.Fatalf("sources len = %d, want 1", len(lf.Sources))
+	}
+	if lf.Sources["first"].ContentHash != "sha256:aaa" {
+		t.Errorf("content_hash = %q, want %q", lf.Sources["first"].ContentHash, "sha256:aaa")
+	}
+}
+
+func TestReadFile_ValidFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "mycelium.lock")
+
+	if err := os.WriteFile(path, []byte(testLockfile), 0644); err != nil {
+		t.Fatalf("write temp file: %v", err)
+	}
+
+	lf, err := ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+
+	if lf.Meta.MyceliumVersion != "1.0.0" {
+		t.Errorf("mycelium_version = %q, want %q", lf.Meta.MyceliumVersion, "1.0.0")
+	}
+	if lf.Meta.SchemaVersion != 1 {
+		t.Errorf("schema_version = %d, want 1", lf.Meta.SchemaVersion)
+	}
+	if len(lf.Sources) != 2 {
+		t.Fatalf("sources len = %d, want 2", len(lf.Sources))
+	}
+	if lf.Sources["envoy-gateway"].Version != "v1.3.0" {
+		t.Errorf("envoy-gateway.version = %q", lf.Sources["envoy-gateway"].Version)
+	}
+	if lf.Sources["platform-sdk"].Commit != "4b7c1d2e3f5a" {
+		t.Errorf("platform-sdk.commit = %q", lf.Sources["platform-sdk"].Commit)
+	}
+}
+
+func TestWriteFile_NoSources(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "mycelium.lock")
+
+	lf := New()
+	lf.Meta = Meta{
+		MyceliumVersion:       "1.0.0",
+		EmbeddingModel:        "test",
+		EmbeddingModelVersion: "1",
+		LockedAt:              "2026-01-01T00:00:00Z",
+		SchemaVersion:         SchemaVersion,
+	}
+	// Write with zero sources to cover the empty-loop path in encode.
+	if err := lf.WriteFile(path); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	lf2, err := ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if len(lf2.Sources) != 0 {
+		t.Errorf("sources len = %d, want 0", len(lf2.Sources))
+	}
+	if lf2.Meta.EmbeddingModel != "test" {
+		t.Errorf("embedding_model = %q, want %q", lf2.Meta.EmbeddingModel, "test")
+	}
+}
+
+func TestWriteFile_ReadOnlyDir(t *testing.T) {
+	dir := t.TempDir()
+	// Make the directory read-only so CreateTemp fails.
+	if err := os.Chmod(dir, 0555); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	t.Cleanup(func() { os.Chmod(dir, 0755) })
+
+	lf := New()
+	lf.Meta.MyceliumVersion = "1.0.0"
+	lf.Meta.EmbeddingModel = "test"
+	lf.Meta.EmbeddingModelVersion = "1"
+	lf.Meta.LockedAt = "2026-01-01T00:00:00Z"
+
+	err := lf.WriteFile(filepath.Join(dir, "mycelium.lock"))
+	if err == nil {
+		t.Fatal("expected error writing to read-only directory")
+	}
+	if !strings.Contains(err.Error(), "create temp lockfile") {
+		t.Errorf("error = %q, want it to contain %q", err, "create temp lockfile")
+	}
+}
+
+func TestWriteFile_RenameFailure(t *testing.T) {
+	dir := t.TempDir()
+	// Create the target path as a directory so os.Rename (file -> directory) fails.
+	targetPath := filepath.Join(dir, "mycelium.lock")
+	if err := os.Mkdir(targetPath, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	lf := New()
+	lf.Meta.MyceliumVersion = "1.0.0"
+	lf.Meta.EmbeddingModel = "test"
+	lf.Meta.EmbeddingModelVersion = "1"
+	lf.Meta.LockedAt = "2026-01-01T00:00:00Z"
+	lf.SetSource("x", SourceLock{ContentHash: "sha256:x", StoreKey: "sha256:x", IngestionType: "built"})
+
+	err := lf.WriteFile(targetPath)
+	if err == nil {
+		t.Fatal("expected error when target path is a directory")
+	}
+	if !strings.Contains(err.Error(), "rename lockfile") {
+		t.Errorf("error = %q, want it to contain %q", err, "rename lockfile")
+	}
+
+	// Verify the temp file was cleaned up (no .tmp files left behind).
+	entries, _ := os.ReadDir(dir)
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".tmp") {
+			t.Errorf("leftover temp file: %s", e.Name())
+		}
+	}
+}
