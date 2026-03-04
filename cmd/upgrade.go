@@ -74,15 +74,12 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 		oldStoreKey = sl.StoreKey
 	}
 
-	host := os.Getenv("WEAVIATE_URL")
-	if host == "" {
-		host = "localhost:8080"
-	}
+	storePath := os.Getenv("MYCELIUM_STORE_DIR")
 
 	newLock, err := pipeline.UpgradeDependency(cmd.Context(), m.Dependencies[depIdx], m.Config.EmbeddingModel, oldStoreKey, pipeline.SyncOptions{
 		ManifestPath: "mycelium.toml",
 		LockfilePath: "mycelium.lock",
-		StoreHost:    host,
+		StorePath:    storePath,
 		Output:       cmd.OutOrStdout(),
 	})
 	if err != nil {

@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"os"
 
 	"github.com/johnlanda/mycelium/internal/embedder"
 	"github.com/johnlanda/mycelium/internal/manifest"
@@ -25,12 +24,7 @@ var serveCmd = &cobra.Command{
 			return fmt.Errorf("create embedder: %w", err)
 		}
 
-		host := os.Getenv("WEAVIATE_URL")
-		if host == "" {
-			host = "localhost:8080"
-		}
-
-		st, err := store.NewWeaviateStore(cmd.Context(), host)
+		st, err := store.NewLanceDBStore(cmd.Context(), store.DefaultStorePath(), emb.Dimensions())
 		if err != nil {
 			return fmt.Errorf("connect store: %w", err)
 		}

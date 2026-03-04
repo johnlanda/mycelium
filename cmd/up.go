@@ -12,13 +12,10 @@ var upCmd = &cobra.Command{
 	Use:   "up",
 	Short: "Sync the local vector store with resolved dependencies",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		host := os.Getenv("WEAVIATE_URL")
-		if host == "" {
-			host = "localhost:8080"
-		}
+		storePath := os.Getenv("MYCELIUM_STORE_DIR")
 
 		results, err := pipeline.Sync(cmd.Context(), pipeline.SyncOptions{
-			StoreHost: host,
+			StorePath: storePath,
 			Output:    cmd.OutOrStdout(),
 		})
 		if err != nil {

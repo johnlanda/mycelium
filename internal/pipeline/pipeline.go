@@ -33,7 +33,7 @@ type SyncResult struct {
 type SyncOptions struct {
 	ManifestPath string
 	LockfilePath string
-	StoreHost    string
+	StorePath    string
 	Output       io.Writer
 }
 
@@ -45,8 +45,8 @@ func Sync(ctx context.Context, opts SyncOptions) ([]SyncResult, error) {
 	if opts.LockfilePath == "" {
 		opts.LockfilePath = "mycelium.lock"
 	}
-	if opts.StoreHost == "" {
-		opts.StoreHost = "localhost:8080"
+	if opts.StorePath == "" {
+		opts.StorePath = store.DefaultStorePath()
 	}
 	if opts.Output == nil {
 		opts.Output = os.Stdout
@@ -72,7 +72,7 @@ func Sync(ctx context.Context, opts SyncOptions) ([]SyncResult, error) {
 		return nil, fmt.Errorf("create embedder: %w", err)
 	}
 
-	st, err := store.NewWeaviateStore(ctx, opts.StoreHost)
+	st, err := store.NewLanceDBStore(ctx, opts.StorePath, emb.Dimensions())
 	if err != nil {
 		return nil, fmt.Errorf("connect store: %w", err)
 	}
@@ -89,8 +89,8 @@ func Sync(ctx context.Context, opts SyncOptions) ([]SyncResult, error) {
 // (new store key differs from oldStoreKey), the old vectors are evicted after the new
 // ones are loaded (NFR-3). Returns the new SourceLock.
 func UpgradeDependency(ctx context.Context, dep manifest.Dependency, embeddingModel string, oldStoreKey string, opts SyncOptions) (*lockfile.SourceLock, error) {
-	if opts.StoreHost == "" {
-		opts.StoreHost = "localhost:8080"
+	if opts.StorePath == "" {
+		opts.StorePath = store.DefaultStorePath()
 	}
 	if opts.Output == nil {
 		opts.Output = os.Stdout
@@ -101,7 +101,7 @@ func UpgradeDependency(ctx context.Context, dep manifest.Dependency, embeddingMo
 		return nil, fmt.Errorf("create embedder: %w", err)
 	}
 
-	st, err := store.NewWeaviateStore(ctx, opts.StoreHost)
+	st, err := store.NewLanceDBStore(ctx, opts.StorePath, emb.Dimensions())
 	if err != nil {
 		return nil, fmt.Errorf("connect store: %w", err)
 	}

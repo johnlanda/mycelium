@@ -26,7 +26,7 @@ mycelium/
 ├── internal/
 │   ├── manifest/            # mycelium.toml parsing and validation
 │   ├── lockfile/            # mycelium.lock read/write
-│   ├── store/               # Vector store abstraction (LanceDB/ChromaDB)
+│   ├── store/               # Vector store abstraction (LanceDB embedded)
 │   ├── fetchers/            # Source fetchers (github, artifact)
 │   ├── chunker/             # Chunking strategies (markdown, code/tree-sitter)
 │   ├── embedder/            # Embedding provider abstraction
@@ -73,15 +73,18 @@ Do not start implementation work without a tracked issue.
 ## Quick Reference
 
 ```bash
-# Build (update when Makefile exists)
-go build -o mctl ./cmd/...
+# One-time setup: download LanceDB native libraries
+make setup-lancedb
+
+# Build
+make build
 
 # Test
-go test ./...
+make test
 
 # Vet
-go vet ./...
+make vet
 
 # Tidy modules
-go mod tidy
+make tidy
 ```

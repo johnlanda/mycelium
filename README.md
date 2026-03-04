@@ -30,21 +30,17 @@ The lockfile (`mycelium.lock`) guarantees that two developers with the same lock
 ### Prerequisites
 
 - Go 1.25+
-- A running [Weaviate](https://weaviate.io/) instance (default: `localhost:8080`)
 - An embedding API key (Voyage AI, OpenAI, or a local Ollama instance)
 
 ### Install
 
-```bash
-go install github.com/johnlanda/mycelium@latest
-```
-
-Or build from source:
+Build from source:
 
 ```bash
 git clone https://github.com/johnlanda/mycelium.git
 cd mycelium
-go build -o mctl .
+make setup-lancedb   # Download native LanceDB libraries (one-time)
+make build           # Build the mctl binary
 ```
 
 ### Initialize a Project
@@ -218,7 +214,7 @@ This is transparent to the user. Pre-built artifacts are always preferred when a
 | `GITHUB_TOKEN` | Token for GitHub.com repos | Optional for public repos |
 | `GHE_TOKEN` | Token for GitHub Enterprise | - |
 | `GHE_URL` | GitHub Enterprise base URL | - |
-| `WEAVIATE_URL` | Weaviate vector store host | `localhost:8080` |
+| `MYCELIUM_STORE_DIR` | LanceDB store directory | `~/.mycelium/store` |
 
 ## Example Workflow
 
@@ -246,17 +242,20 @@ No Confluence spelunking required.
 ## Development
 
 ```bash
+# One-time setup: download LanceDB native libraries
+make setup-lancedb
+
 # Build
-go build -o mctl .
+make build
 
 # Test
-go test ./...
+make test
 
 # Vet
-go vet ./...
+make vet
 
 # Tidy modules
-go mod tidy
+make tidy
 ```
 
 ## Architecture
@@ -276,7 +275,7 @@ mctl CLI
                    └─────────────┬──────────────┘
                                  │
                    ┌─────────────▼──────────────┐
-                   │  Vector Store (Weaviate)    │
+                   │  Vector Store (LanceDB)     │
                    │  Partitioned by store_key   │
                    └─────────────┬──────────────┘
                                  │
@@ -302,7 +301,7 @@ mycelium/
 │   ├── manifest/             # mycelium.toml parsing and validation
 │   ├── mcp/                  # MCP server (search, search_code, list_sources)
 │   ├── pipeline/             # Orchestrates fetch → chunk → embed → upsert
-│   └── store/                # Vector store abstraction (Weaviate)
+│   └── store/                # Vector store abstraction (LanceDB)
 ├── mycelium.toml             # Project manifest (committed)
 ├── mycelium.lock             # Lockfile (committed, never hand-edited)
 └── go.mod

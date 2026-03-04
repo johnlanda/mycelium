@@ -40,13 +40,8 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	// Try connecting to the store; if unavailable, we'll show "unknown" for store status.
-	host := os.Getenv("WEAVIATE_URL")
-	if host == "" {
-		host = "localhost:8080"
-	}
-
 	var st store.Store
-	st, storeErr := store.NewWeaviateStore(cmd.Context(), host)
+	st, storeErr := store.NewLanceDBStore(cmd.Context(), store.DefaultStorePath(), 0)
 	if storeErr == nil {
 		defer st.Close()
 	}
