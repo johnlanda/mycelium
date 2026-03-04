@@ -113,9 +113,9 @@ func resolveHEAD(ctx context.Context, dir string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-// selectToken returns an auth token for the given source based on
+// SelectToken returns an auth token for the given source based on
 // environment variables.
-func selectToken(source string) string {
+func SelectToken(source string) string {
 	if strings.HasPrefix(source, "github.com/") {
 		return os.Getenv("GITHUB_TOKEN")
 	}
@@ -138,7 +138,7 @@ func selectToken(source string) string {
 // buildCloneURL constructs the HTTPS clone URL, embedding an auth token
 // when available.
 func buildCloneURL(source string) string {
-	token := selectToken(source)
+	token := SelectToken(source)
 	if token != "" {
 		return "https://" + token + "@" + source + ".git"
 	}

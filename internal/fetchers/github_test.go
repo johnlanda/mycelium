@@ -339,12 +339,12 @@ func TestFetch_InvalidRef(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// selectToken tests
+// SelectToken tests
 // ---------------------------------------------------------------------------
 
 func TestSelectToken_GitHubCom(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "ghp_test123")
-	tok := selectToken("github.com/org/repo")
+	tok := SelectToken("github.com/org/repo")
 	if tok != "ghp_test123" {
 		t.Errorf("got %q, want ghp_test123", tok)
 	}
@@ -354,7 +354,7 @@ func TestSelectToken_GHE(t *testing.T) {
 	t.Setenv("GHE_URL", "https://git.corp.example.com")
 	t.Setenv("GHE_TOKEN", "ghe_secret")
 
-	tok := selectToken("git.corp.example.com/org/repo")
+	tok := SelectToken("git.corp.example.com/org/repo")
 	if tok != "ghe_secret" {
 		t.Errorf("got %q, want ghe_secret", tok)
 	}
@@ -364,7 +364,7 @@ func TestSelectToken_GHE_NoScheme(t *testing.T) {
 	t.Setenv("GHE_URL", "git.corp.example.com")
 	t.Setenv("GHE_TOKEN", "ghe_secret")
 
-	tok := selectToken("git.corp.example.com/org/repo")
+	tok := SelectToken("git.corp.example.com/org/repo")
 	if tok != "ghe_secret" {
 		t.Errorf("got %q, want ghe_secret", tok)
 	}
@@ -375,7 +375,7 @@ func TestSelectToken_NoAuth(t *testing.T) {
 	t.Setenv("GHE_URL", "")
 	t.Setenv("GHE_TOKEN", "")
 
-	tok := selectToken("github.com/org/repo")
+	tok := SelectToken("github.com/org/repo")
 	if tok != "" {
 		t.Errorf("got %q, want empty", tok)
 	}

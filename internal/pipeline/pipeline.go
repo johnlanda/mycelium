@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/johnlanda/mycelium/internal/artifact"
 	"github.com/johnlanda/mycelium/internal/chunker"
 	"github.com/johnlanda/mycelium/internal/embedder"
 	"github.com/johnlanda/mycelium/internal/fetchers"
@@ -112,9 +113,18 @@ func UpgradeDependency(ctx context.Context, dep manifest.Dependency, embeddingMo
 
 	fmt.Fprintf(opts.Output, "Upgrading %s...\n", dep.ID)
 
-	sl, skipped, err := syncDependency(ctx, dep, fetcher, st, emb, mdChunker, codeChunker)
-	if err != nil {
-		return nil, err
+	// Try artifact path first.
+	sl, skipped, found, artErr := syncDependencyFromArtifact(ctx, dep, embeddingModel, st, nil)
+	if artErr != nil {
+		fmt.Fprintf(opts.Output, "  %s: artifact failed, building from source: %v\n", dep.ID, artErr)
+		found = false
+	}
+	if !found {
+		var syncErr error
+		sl, skipped, syncErr = syncDependency(ctx, dep, fetcher, st, emb, mdChunker, codeChunker)
+		if syncErr != nil {
+			return nil, syncErr
+		}
 	}
 
 	if skipped {
@@ -152,7 +162,19 @@ func syncAll(
 
 	for _, dep := range m.Dependencies {
 		start := time.Now()
-		sl, skipped, err := syncDependency(ctx, dep, fetcher, st, emb, mdChunker, codeChunker)
+
+		// Try artifact path first.
+		existingLock := lf.Sources[dep.ID]
+		sl, skipped, found, artErr := syncDependencyFromArtifact(ctx, dep, m.Config.EmbeddingModel, st, &existingLock)
+		if artErr != nil {
+			fmt.Fprintf(opts.Output, "  %s: artifact failed, building from source: %v\n", dep.ID, artErr)
+			found = false
+		}
+		var err error
+		if !found {
+			sl, skipped, err = syncDependency(ctx, dep, fetcher, st, emb, mdChunker, codeChunker)
+		}
+
 		elapsed := time.Since(start)
 
 		if err != nil {
@@ -241,7 +263,7 @@ func syncDependency(
 		return sl, true, nil
 	}
 
-	stored, err := processFiles(ctx, result.Files, dep.ID, dep.Ref, emb, mdChunker, codeChunker, sk)
+	stored, err := ProcessFiles(ctx, result.Files, dep.ID, dep.Ref, emb, mdChunker, codeChunker, sk)
 	if err != nil {
 		return nil, false, err
 	}
@@ -251,6 +273,73 @@ func syncDependency(
 	}
 
 	return sl, false, nil
+}
+
+// syncDependencyFromArtifact attempts to sync a dependency from a pre-built
+// embedding artifact. Returns (lock, skipped, found, err). If found is false
+// the caller should fall back to building from source.
+func syncDependencyFromArtifact(
+	ctx context.Context,
+	dep manifest.Dependency,
+	modelSlug string,
+	st store.Store,
+	existingLock *lockfile.SourceLock,
+) (sl *lockfile.SourceLock, skipped bool, found bool, err error) {
+	// If the lockfile already has artifact info, reuse it.
+	var artifactURL, artifactHash string
+	if existingLock != nil && existingLock.ArtifactURL != "" && existingLock.ArtifactHash != "" {
+		artifactURL = existingLock.ArtifactURL
+		artifactHash = existingLock.ArtifactHash
+	} else {
+		artifactURL = artifact.ResolveArtifactURL(dep.Source, dep.Ref, modelSlug)
+		exists, checkErr := artifact.CheckArtifactExists(ctx, artifactURL)
+		if checkErr != nil {
+			return nil, false, false, checkErr
+		}
+		if !exists {
+			return nil, false, false, nil
+		}
+		// Fetch the companion checksum.
+		artifactHash, err = artifact.FetchChecksumFromURL(ctx, artifactURL)
+		if err != nil {
+			return nil, false, false, fmt.Errorf("fetch checksum: %w", err)
+		}
+	}
+
+	// Download and verify the artifact.
+	result, err := artifact.FetchArtifact(ctx, artifactURL, artifactHash)
+	if err != nil {
+		return nil, false, true, fmt.Errorf("fetch artifact: %w", err)
+	}
+
+	// Check if we already have this store key.
+	storeKey := result.Meta.StoreKey
+	if storeKey == "" && len(result.Chunks) > 0 {
+		storeKey = result.Chunks[0].StoreKey
+	}
+	exists, err := st.HasKey(ctx, storeKey)
+	if err != nil {
+		return nil, false, true, fmt.Errorf("check store key: %w", err)
+	}
+
+	sl = &lockfile.SourceLock{
+		Version:       dep.Ref,
+		Commit:        result.Meta.Commit,
+		StoreKey:      storeKey,
+		IngestionType: "artifact",
+		ArtifactURL:   artifactURL,
+		ArtifactHash:  result.Checksum,
+	}
+
+	if exists {
+		return sl, true, true, nil
+	}
+
+	if err := st.Upsert(ctx, storeKey, result.Chunks); err != nil {
+		return nil, false, true, fmt.Errorf("upsert artifact: %w", err)
+	}
+
+	return sl, false, true, nil
 }
 
 // syncLocal collects files from local index paths, then runs the same
@@ -306,7 +395,7 @@ func syncLocal(
 		return sl, true, nil
 	}
 
-	stored, err := processFiles(ctx, files, "local", "", emb, mdChunker, codeChunker, sk)
+	stored, err := ProcessFiles(ctx, files, "local", "", emb, mdChunker, codeChunker, sk)
 	if err != nil {
 		return nil, false, err
 	}
@@ -318,8 +407,8 @@ func syncLocal(
 	return sl, false, nil
 }
 
-// processFiles classifies files, chunks them, embeds the chunks, and returns StoredChunks.
-func processFiles(
+// ProcessFiles classifies files, chunks them, embeds the chunks, and returns StoredChunks.
+func ProcessFiles(
 	ctx context.Context,
 	files []hasher.FileContent,
 	source, sourceVersion string,
