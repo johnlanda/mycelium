@@ -31,10 +31,11 @@ type SyncResult struct {
 
 // SyncOptions configures the sync pipeline.
 type SyncOptions struct {
-	ManifestPath string
-	LockfilePath string
-	StorePath    string
-	Output       io.Writer
+	ManifestPath        string
+	LockfilePath        string
+	StorePath           string
+	EmbeddingDimensions int
+	Output              io.Writer
 }
 
 // Sync runs the full sync pipeline for all dependencies in the manifest.
@@ -67,7 +68,9 @@ func Sync(ctx context.Context, opts SyncOptions) ([]SyncResult, error) {
 		}
 	}
 
-	emb, err := embedder.NewEmbedder(m.Config.EmbeddingModel, embedder.Config{})
+	emb, err := embedder.NewEmbedder(m.Config.EmbeddingModel, embedder.Config{
+		EmbeddingDimensions: m.Config.EmbeddingDimensions,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("create embedder: %w", err)
 	}
@@ -96,7 +99,9 @@ func UpgradeDependency(ctx context.Context, dep manifest.Dependency, embeddingMo
 		opts.Output = os.Stdout
 	}
 
-	emb, err := embedder.NewEmbedder(embeddingModel, embedder.Config{})
+	emb, err := embedder.NewEmbedder(embeddingModel, embedder.Config{
+		EmbeddingDimensions: opts.EmbeddingDimensions,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("create embedder: %w", err)
 	}

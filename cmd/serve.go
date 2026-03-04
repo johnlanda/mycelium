@@ -19,7 +19,9 @@ var serveCmd = &cobra.Command{
 			return fmt.Errorf("parse manifest: %w", err)
 		}
 
-		emb, err := embedder.NewEmbedder(m.Config.EmbeddingModel, embedder.Config{})
+		emb, err := embedder.NewEmbedder(m.Config.EmbeddingModel, embedder.Config{
+			EmbeddingDimensions: m.Config.EmbeddingDimensions,
+		})
 		if err != nil {
 			return fmt.Errorf("create embedder: %w", err)
 		}

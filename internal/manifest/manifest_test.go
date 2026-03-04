@@ -118,6 +118,40 @@ code = ["pkg/"]
 			},
 		},
 		{
+			name: "embedding_dimensions set",
+			input: `
+[config]
+embedding_model = "ollama/qwen3-embedding"
+embedding_dimensions = 1024
+`,
+			check: func(t *testing.T, m *Manifest) {
+				if m.Config.EmbeddingDimensions != 1024 {
+					t.Errorf("embedding_dimensions = %d, want 1024", m.Config.EmbeddingDimensions)
+				}
+			},
+		},
+		{
+			name: "embedding_dimensions zero (omitted)",
+			input: `
+[config]
+embedding_model = "voyage-code-2"
+`,
+			check: func(t *testing.T, m *Manifest) {
+				if m.Config.EmbeddingDimensions != 0 {
+					t.Errorf("embedding_dimensions = %d, want 0", m.Config.EmbeddingDimensions)
+				}
+			},
+		},
+		{
+			name: "negative embedding_dimensions",
+			input: `
+[config]
+embedding_model = "voyage-code-2"
+embedding_dimensions = -1
+`,
+			wantErr: "config.embedding_dimensions must not be negative",
+		},
+		{
 			name: "missing embedding_model",
 			input: `
 [config]
@@ -293,6 +327,33 @@ func TestWriteFile(t *testing.T) {
 	dep := got.Dependencies[0]
 	if dep.ID != "mylib" || dep.Source != "github.com/org/mylib" || dep.Ref != "v2.0.0" {
 		t.Errorf("dep = %+v, want id=mylib source=github.com/org/mylib ref=v2.0.0", dep)
+	}
+}
+
+func TestWriteFileRoundTripWithDimensions(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "mycelium.toml")
+
+	m := &Manifest{
+		Config: Config{
+			EmbeddingModel:      "ollama/qwen3-embedding",
+			EmbeddingDimensions: 512,
+		},
+		Dependencies: []Dependency{
+			{ID: "lib", Source: "github.com/org/lib", Ref: "v1.0.0"},
+		},
+	}
+
+	if err := m.WriteFile(path); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	got, err := ParseFile(path)
+	if err != nil {
+		t.Fatalf("ParseFile after WriteFile: %v", err)
+	}
+	if got.Config.EmbeddingDimensions != 512 {
+		t.Errorf("embedding_dimensions = %d, want 512", got.Config.EmbeddingDimensions)
 	}
 }
 

@@ -21,8 +21,9 @@ type Manifest struct {
 
 // Config holds top-level configuration.
 type Config struct {
-	EmbeddingModel string `toml:"embedding_model"`
-	Publish        string `toml:"publish,omitempty"`
+	EmbeddingModel      string `toml:"embedding_model"`
+	EmbeddingDimensions int    `toml:"embedding_dimensions,omitempty"`
+	Publish             string `toml:"publish,omitempty"`
 }
 
 // Local defines paths to index from the local project.
@@ -69,6 +70,10 @@ func (m *Manifest) Validate() error {
 
 	if m.Config.EmbeddingModel == "" {
 		errs = append(errs, "config.embedding_model is required")
+	}
+
+	if m.Config.EmbeddingDimensions < 0 {
+		errs = append(errs, "config.embedding_dimensions must not be negative")
 	}
 
 	seen := make(map[string]bool)

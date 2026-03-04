@@ -77,10 +77,11 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 	storePath := os.Getenv("MYCELIUM_STORE_DIR")
 
 	newLock, err := pipeline.UpgradeDependency(cmd.Context(), m.Dependencies[depIdx], m.Config.EmbeddingModel, oldStoreKey, pipeline.SyncOptions{
-		ManifestPath: "mycelium.toml",
-		LockfilePath: "mycelium.lock",
-		StorePath:    storePath,
-		Output:       cmd.OutOrStdout(),
+		ManifestPath:        "mycelium.toml",
+		LockfilePath:        "mycelium.lock",
+		StorePath:           storePath,
+		EmbeddingDimensions: m.Config.EmbeddingDimensions,
+		Output:              cmd.OutOrStdout(),
 	})
 	if err != nil {
 		return fmt.Errorf("upgrade %s: %w", depID, err)

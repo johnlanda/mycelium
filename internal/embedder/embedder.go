@@ -18,8 +18,9 @@ type Embedder interface {
 
 // Config holds shared configuration for embedding providers.
 type Config struct {
-	MaxRetries int          // default 5
-	HTTPClient *http.Client // injectable for tests
+	MaxRetries          int          // default 5
+	HTTPClient          *http.Client // injectable for tests
+	EmbeddingDimensions int          // 0 = auto-detect (Ollama only)
 }
 
 func applyDefaults(cfg *Config) {
@@ -59,7 +60,7 @@ func NewEmbedder(model string, cfg Config) (Embedder, error) {
 		if baseURL == "" {
 			baseURL = "http://localhost:11434"
 		}
-		return newOllamaEmbedder(ollamaModel, baseURL, cfg), nil
+		return newOllamaEmbedder(ollamaModel, baseURL, cfg)
 
 	default:
 		return nil, fmt.Errorf(

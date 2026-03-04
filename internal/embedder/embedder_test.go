@@ -18,6 +18,14 @@ func TestFactoryKnownModels(t *testing.T) {
 	t.Setenv("VOYAGE_API_KEY", "test-key")
 	t.Setenv("OPENAI_API_KEY", "test-key")
 
+	// For ollama, we need a mock server that handles /api/tags + /api/embed.
+	srv := newMockOllamaServer(t, mockOllamaOpts{
+		models: []string{"nomic-embed-text"},
+		dims:   4,
+	})
+	defer srv.Close()
+	t.Setenv("OLLAMA_URL", srv.URL)
+
 	tests := []struct {
 		model    string
 		wantType string
@@ -80,6 +88,56 @@ func TestFactoryMissingAPIKey(t *testing.T) {
 	}
 }
 
+// --- Mock Ollama server helper ---
+
+type mockOllamaOpts struct {
+	models []string // model names to list in /api/tags
+	dims   int      // embedding dimensions to return
+}
+
+// newMockOllamaServer creates a httptest.Server that handles /api/tags and /api/embed.
+func newMockOllamaServer(t *testing.T, opts mockOllamaOpts) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/tags":
+			tagsResp := ollamaTagsResponse{}
+			for _, m := range opts.models {
+				tagsResp.Models = append(tagsResp.Models, ollamaModelInfo{Name: m + ":latest"})
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(tagsResp)
+
+		case r.Method == http.MethodPost && r.URL.Path == "/api/embed":
+			var req ollamaRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Errorf("decode ollama request: %v", err)
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+
+			dims := opts.dims
+			if req.Dimensions > 0 {
+				dims = req.Dimensions
+			}
+
+			resp := ollamaResponse{}
+			for range req.Input {
+				vec := make([]float64, dims)
+				for j := range vec {
+					vec[j] = 0.1 * float64(j+1)
+				}
+				resp.Embeddings = append(resp.Embeddings, vec)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(resp)
+
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+}
+
 // --- Helper to create a mock embedding server ---
 
 func mockEmbeddingServer(t *testing.T, dims int, handler func(w http.ResponseWriter, r *http.Request)) *httptest.Server {
@@ -110,7 +168,7 @@ func TestVoyageEmbed(t *testing.T) {
 		}
 
 		resp := voyageResponse{}
-		for i, _ := range req.Input {
+		for i := range req.Input {
 			resp.Data = append(resp.Data, struct {
 				Embedding []float64 `json:"embedding"`
 				Index     int       `json:"index"`
@@ -167,7 +225,7 @@ func TestOpenAIEmbed(t *testing.T) {
 		}
 
 		resp := openaiResponse{}
-		for i, _ := range req.Input {
+		for i := range req.Input {
 			resp.Data = append(resp.Data, struct {
 				Embedding []float64 `json:"embedding"`
 				Index     int       `json:"index"`
@@ -201,32 +259,17 @@ func TestOpenAIEmbed(t *testing.T) {
 // --- Ollama tests ---
 
 func TestOllamaEmbed(t *testing.T) {
-	srv := mockEmbeddingServer(t, 4, func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			t.Errorf("expected POST, got %s", r.Method)
-		}
-		if r.URL.Path != "/api/embed" {
-			t.Errorf("expected /api/embed, got %s", r.URL.Path)
-		}
-
-		var req ollamaRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			t.Fatalf("decode request: %v", err)
-		}
-		if req.Model != "nomic-embed-text" {
-			t.Errorf("expected model nomic-embed-text, got %s", req.Model)
-		}
-
-		resp := ollamaResponse{
-			Embeddings: [][]float64{{0.1, 0.2, 0.3, 0.4}},
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+	srv := newMockOllamaServer(t, mockOllamaOpts{
+		models: []string{"nomic-embed-text"},
+		dims:   4,
 	})
 	defer srv.Close()
 
-	e := newOllamaEmbedder("nomic-embed-text", srv.URL, Config{MaxRetries: 1})
+	e, err := newOllamaEmbedder("nomic-embed-text", srv.URL, Config{MaxRetries: 1})
+	if err != nil {
+		t.Fatalf("newOllamaEmbedder error: %v", err)
+	}
+
 	vecs, err := e.Embed(context.Background(), []string{"hello", "world"})
 	if err != nil {
 		t.Fatalf("Embed error: %v", err)
@@ -238,7 +281,230 @@ func TestOllamaEmbed(t *testing.T) {
 		t.Fatalf("expected 4 dimensions, got %d", len(vecs[0]))
 	}
 	if e.Dimensions() != 4 {
-		t.Errorf("expected dimensions=4 after first embed, got %d", e.Dimensions())
+		t.Errorf("expected dimensions=4, got %d", e.Dimensions())
+	}
+}
+
+func TestOllamaEmbed_Batch(t *testing.T) {
+	var callCount atomic.Int32
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/tags":
+			json.NewEncoder(w).Encode(ollamaTagsResponse{
+				Models: []ollamaModelInfo{{Name: "test-model:latest"}},
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/embed":
+			callCount.Add(1)
+			var req ollamaRequest
+			json.NewDecoder(r.Body).Decode(&req)
+			resp := ollamaResponse{}
+			for range req.Input {
+				resp.Embeddings = append(resp.Embeddings, []float64{0.1, 0.2})
+			}
+			json.NewEncoder(w).Encode(resp)
+		}
+	}))
+	defer srv.Close()
+
+	e, err := newOllamaEmbedder("test-model", srv.URL, Config{
+		MaxRetries:          1,
+		EmbeddingDimensions: 2, // skip probe
+	})
+	if err != nil {
+		t.Fatalf("newOllamaEmbedder error: %v", err)
+	}
+
+	// Reset call count after construction (probe/tags calls).
+	callCount.Store(0)
+
+	// 200 texts with batch size 64 → ceil(200/64) = 4 requests.
+	texts := make([]string, 200)
+	for i := range texts {
+		texts[i] = fmt.Sprintf("text-%d", i)
+	}
+
+	vecs, err := e.Embed(context.Background(), texts)
+	if err != nil {
+		t.Fatalf("Embed error: %v", err)
+	}
+	if len(vecs) != 200 {
+		t.Errorf("expected 200 vectors, got %d", len(vecs))
+	}
+	if calls := callCount.Load(); calls != 4 {
+		t.Errorf("expected 4 API calls (batching), got %d", calls)
+	}
+}
+
+func TestOllamaEmbed_ConfiguredDimensions(t *testing.T) {
+	var capturedDims int
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/tags":
+			json.NewEncoder(w).Encode(ollamaTagsResponse{
+				Models: []ollamaModelInfo{{Name: "qwen3-embedding:latest"}},
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/embed":
+			var req ollamaRequest
+			json.NewDecoder(r.Body).Decode(&req)
+			capturedDims = req.Dimensions
+			dims := req.Dimensions
+			if dims == 0 {
+				dims = 4096
+			}
+			resp := ollamaResponse{}
+			for range req.Input {
+				vec := make([]float64, dims)
+				resp.Embeddings = append(resp.Embeddings, vec)
+			}
+			json.NewEncoder(w).Encode(resp)
+		}
+	}))
+	defer srv.Close()
+
+	e, err := newOllamaEmbedder("qwen3-embedding", srv.URL, Config{
+		MaxRetries:          1,
+		EmbeddingDimensions: 1024,
+	})
+	if err != nil {
+		t.Fatalf("newOllamaEmbedder error: %v", err)
+	}
+
+	if e.Dimensions() != 1024 {
+		t.Errorf("Dimensions() = %d, want 1024", e.Dimensions())
+	}
+
+	vecs, err := e.Embed(context.Background(), []string{"hello"})
+	if err != nil {
+		t.Fatalf("Embed error: %v", err)
+	}
+	if capturedDims != 1024 {
+		t.Errorf("request dimensions = %d, want 1024", capturedDims)
+	}
+	if len(vecs[0]) != 1024 {
+		t.Errorf("vector length = %d, want 1024", len(vecs[0]))
+	}
+}
+
+func TestOllamaEmbed_DimensionProbe(t *testing.T) {
+	srv := newMockOllamaServer(t, mockOllamaOpts{
+		models: []string{"test-model"},
+		dims:   768,
+	})
+	defer srv.Close()
+
+	e, err := newOllamaEmbedder("test-model", srv.URL, Config{MaxRetries: 1})
+	if err != nil {
+		t.Fatalf("newOllamaEmbedder error: %v", err)
+	}
+
+	if e.Dimensions() != 768 {
+		t.Errorf("Dimensions() = %d, want 768 (probed)", e.Dimensions())
+	}
+}
+
+func TestOllamaEmbed_ModelNotFound(t *testing.T) {
+	// Server that lists no matching models.
+	srv := newMockOllamaServer(t, mockOllamaOpts{
+		models: []string{"other-model"},
+		dims:   4,
+	})
+	defer srv.Close()
+
+	_, err := newOllamaEmbedder("nonexistent-model", srv.URL, Config{MaxRetries: 1})
+	if err == nil {
+		t.Fatal("expected error for model not found")
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("error should mention 'not found', got: %s", err.Error())
+	}
+	if !strings.Contains(err.Error(), "ollama pull") {
+		t.Errorf("error should suggest 'ollama pull', got: %s", err.Error())
+	}
+}
+
+func TestOllamaEmbed_OllamaUnreachable(t *testing.T) {
+	// Use an address that will not connect.
+	_, err := newOllamaEmbedder("test-model", "http://127.0.0.1:1", Config{MaxRetries: 1})
+	if err == nil {
+		t.Fatal("expected error for unreachable server")
+	}
+	if !strings.Contains(err.Error(), "unreachable") {
+		t.Errorf("error should mention 'unreachable', got: %s", err.Error())
+	}
+}
+
+func TestOllamaEmbed_Truncate(t *testing.T) {
+	var gotTruncate bool
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/tags":
+			json.NewEncoder(w).Encode(ollamaTagsResponse{
+				Models: []ollamaModelInfo{{Name: "test-model:latest"}},
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/embed":
+			var req ollamaRequest
+			json.NewDecoder(r.Body).Decode(&req)
+			gotTruncate = req.Truncate
+			resp := ollamaResponse{}
+			for range req.Input {
+				resp.Embeddings = append(resp.Embeddings, []float64{0.1, 0.2, 0.3})
+			}
+			json.NewEncoder(w).Encode(resp)
+		}
+	}))
+	defer srv.Close()
+
+	e, err := newOllamaEmbedder("test-model", srv.URL, Config{
+		MaxRetries:          1,
+		EmbeddingDimensions: 3,
+	})
+	if err != nil {
+		t.Fatalf("newOllamaEmbedder error: %v", err)
+	}
+
+	_, err = e.Embed(context.Background(), []string{"hello"})
+	if err != nil {
+		t.Fatalf("Embed error: %v", err)
+	}
+	if !gotTruncate {
+		t.Error("expected truncate=true in request, got false")
+	}
+}
+
+func TestOllamaEmbed_BatchResponseMismatch(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/tags":
+			json.NewEncoder(w).Encode(ollamaTagsResponse{
+				Models: []ollamaModelInfo{{Name: "test-model:latest"}},
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/embed":
+			// Always return exactly 1 embedding regardless of input count.
+			resp := ollamaResponse{
+				Embeddings: [][]float64{{0.1, 0.2}},
+			}
+			json.NewEncoder(w).Encode(resp)
+		}
+	}))
+	defer srv.Close()
+
+	e, err := newOllamaEmbedder("test-model", srv.URL, Config{
+		MaxRetries:          1,
+		EmbeddingDimensions: 2,
+	})
+	if err != nil {
+		t.Fatalf("newOllamaEmbedder error: %v", err)
+	}
+
+	_, err = e.Embed(context.Background(), []string{"one", "two", "three"})
+	if err == nil {
+		t.Fatal("expected error for response count mismatch")
+	}
+	if !strings.Contains(err.Error(), "expected 3 embeddings") {
+		t.Errorf("error should mention expected count, got: %s", err.Error())
 	}
 }
 
@@ -392,6 +658,13 @@ func TestNon429NotRetried(t *testing.T) {
 // --- Empty input tests ---
 
 func TestEmptyInput(t *testing.T) {
+	// Ollama constructor needs a server, so create one for the test.
+	srv := newMockOllamaServer(t, mockOllamaOpts{
+		models: []string{"model"},
+		dims:   4,
+	})
+	defer srv.Close()
+
 	tests := []struct {
 		name    string
 		embedFn func() ([][]float32, error)
@@ -413,7 +686,10 @@ func TestEmptyInput(t *testing.T) {
 		{
 			"ollama",
 			func() ([][]float32, error) {
-				e := newOllamaEmbedder("model", "http://unused", Config{MaxRetries: 1})
+				e, err := newOllamaEmbedder("model", srv.URL, Config{MaxRetries: 1})
+				if err != nil {
+					return nil, err
+				}
 				return e.Embed(context.Background(), []string{})
 			},
 		},
@@ -465,11 +741,22 @@ func TestContextCancellation(t *testing.T) {
 // --- ModelID / Dimensions ---
 
 func TestModelIDAndDimensions(t *testing.T) {
+	srv := newMockOllamaServer(t, mockOllamaOpts{
+		models: []string{"nomic-embed-text"},
+		dims:   768,
+	})
+	defer srv.Close()
+
+	ollamaEmb, err := newOllamaEmbedder("nomic-embed-text", srv.URL, Config{MaxRetries: 1})
+	if err != nil {
+		t.Fatalf("newOllamaEmbedder error: %v", err)
+	}
+
 	tests := []struct {
-		name       string
-		embedder   Embedder
-		wantModel  string
-		wantDims   int
+		name      string
+		embedder  Embedder
+		wantModel string
+		wantDims  int
 	}{
 		{
 			"voyage",
@@ -485,9 +772,9 @@ func TestModelIDAndDimensions(t *testing.T) {
 		},
 		{
 			"ollama",
-			newOllamaEmbedder("nomic-embed-text", "http://unused", Config{MaxRetries: 1}),
+			ollamaEmb,
 			"ollama/nomic-embed-text",
-			0, // dimensions are detected on first embed
+			768, // now probed at construction time
 		},
 	}
 
