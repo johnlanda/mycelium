@@ -84,6 +84,55 @@ func Sync(ctx context.Context, opts SyncOptions) ([]SyncResult, error) {
 	return syncAll(ctx, m, lf, st, emb, fetcher, mdChunker, codeChunker, opts)
 }
 
+// UpgradeDependency syncs a single dependency atomically. If the content has changed
+// (new store key differs from oldStoreKey), the old vectors are evicted after the new
+// ones are loaded (NFR-3). Returns the new SourceLock.
+func UpgradeDependency(ctx context.Context, dep manifest.Dependency, embeddingModel string, oldStoreKey string, opts SyncOptions) (*lockfile.SourceLock, error) {
+	if opts.StoreHost == "" {
+		opts.StoreHost = "localhost:8080"
+	}
+	if opts.Output == nil {
+		opts.Output = os.Stdout
+	}
+
+	emb, err := embedder.NewEmbedder(embeddingModel, embedder.Config{})
+	if err != nil {
+		return nil, fmt.Errorf("create embedder: %w", err)
+	}
+
+	st, err := store.NewWeaviateStore(ctx, opts.StoreHost)
+	if err != nil {
+		return nil, fmt.Errorf("connect store: %w", err)
+	}
+	defer st.Close()
+
+	mdChunker := chunker.NewMarkdownChunker(chunker.DefaultOptions())
+	codeChunker := chunker.NewCodeChunker(chunker.DefaultOptions())
+	fetcher := &fetchers.GitHubFetcher{}
+
+	fmt.Fprintf(opts.Output, "Upgrading %s...\n", dep.ID)
+
+	sl, skipped, err := syncDependency(ctx, dep, fetcher, st, emb, mdChunker, codeChunker)
+	if err != nil {
+		return nil, err
+	}
+
+	if skipped {
+		fmt.Fprintf(opts.Output, "  %s: unchanged\n", dep.ID)
+	} else {
+		fmt.Fprintf(opts.Output, "  %s: synced\n", dep.ID)
+	}
+
+	// Evict old vectors if the store key changed (atomic: new loaded before old evicted).
+	if oldStoreKey != "" && oldStoreKey != sl.StoreKey {
+		if err := st.Delete(ctx, oldStoreKey); err != nil {
+			return nil, fmt.Errorf("evict old store key: %w", err)
+		}
+	}
+
+	return sl, nil
+}
+
 // syncAll is the core loop extracted for testability. It accepts interfaces
 // rather than concrete types so tests can inject mocks.
 func syncAll(

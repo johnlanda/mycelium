@@ -2,9 +2,11 @@
 package manifest
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -93,6 +95,38 @@ func (m *Manifest) Validate() error {
 
 	if len(errs) > 0 {
 		return fmt.Errorf("invalid manifest:\n  %s", strings.Join(errs, "\n  "))
+	}
+	return nil
+}
+
+// WriteFile writes the manifest atomically to the given path.
+// It writes to a temporary file in the same directory, then renames.
+func (m *Manifest) WriteFile(path string) error {
+	var buf bytes.Buffer
+	if err := toml.NewEncoder(&buf).Encode(m); err != nil {
+		return fmt.Errorf("encode manifest: %w", err)
+	}
+
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, "mycelium.toml.*.tmp")
+	if err != nil {
+		return fmt.Errorf("create temp manifest: %w", err)
+	}
+	tmpPath := tmp.Name()
+
+	if _, err := tmp.Write(buf.Bytes()); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return fmt.Errorf("write temp manifest: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("close temp manifest: %w", err)
+	}
+
+	if err := os.Rename(tmpPath, path); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("rename manifest: %w", err)
 	}
 	return nil
 }
