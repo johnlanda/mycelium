@@ -26,13 +26,18 @@ var serveCmd = &cobra.Command{
 			return fmt.Errorf("create embedder: %w", err)
 		}
 
-		st, err := store.NewLanceDBStore(cmd.Context(), store.DefaultStorePath(), emb.Dimensions())
+		cachedEmb, err := embedder.NewCachingEmbedder(emb, embedder.DefaultCacheSize)
+		if err != nil {
+			return fmt.Errorf("create caching embedder: %w", err)
+		}
+
+		st, err := store.NewLanceDBStore(cmd.Context(), store.DefaultStorePath(), cachedEmb.Dimensions())
 		if err != nil {
 			return fmt.Errorf("connect store: %w", err)
 		}
 		defer st.Close()
 
-		srv := mcpserver.NewServer(st, emb)
+		srv := mcpserver.NewServer(st, cachedEmb)
 		return srv.Serve(cmd.Context())
 	},
 }
