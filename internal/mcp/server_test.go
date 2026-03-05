@@ -12,12 +12,14 @@ import (
 
 // mockEmbedder returns fixed vectors and tracks received texts.
 type mockEmbedder struct {
-	vectors [][]float32
-	err     error
-	texts   []string
+	vectors   [][]float32
+	err       error
+	texts     []string
+	embedCalls int
 }
 
 func (m *mockEmbedder) Embed(_ context.Context, texts []string) ([][]float32, error) {
+	m.embedCalls++
 	m.texts = append(m.texts, texts...)
 	if m.err != nil {
 		return nil, m.err
@@ -33,12 +35,15 @@ type mockStore struct {
 	searchResults []store.SearchResult
 	searchErr     error
 	searchOpts    store.SearchOpts
+	searchCalls   int
 
-	sources    []store.SourceInfo
-	sourcesErr error
+	sources      []store.SourceInfo
+	sourcesErr   error
+	sourcesCalls int
 }
 
 func (m *mockStore) Search(_ context.Context, _ []float32, opts store.SearchOpts) ([]store.SearchResult, error) {
+	m.searchCalls++
 	m.searchOpts = opts
 	if m.searchErr != nil {
 		return nil, m.searchErr
@@ -47,6 +52,7 @@ func (m *mockStore) Search(_ context.Context, _ []float32, opts store.SearchOpts
 }
 
 func (m *mockStore) ListSources(_ context.Context) ([]store.SourceInfo, error) {
+	m.sourcesCalls++
 	if m.sourcesErr != nil {
 		return nil, m.sourcesErr
 	}
@@ -279,4 +285,236 @@ func extractText(t *testing.T, result *sdkmcp.CallToolResult) string {
 		t.Fatalf("expected TextContent, got %T", result.Content[0])
 	}
 	return tc.Text
+}
+
+func TestCacheSearchHit(t *testing.T) {
+	ctx := context.Background()
+	ms := &mockStore{
+		searchResults: []store.SearchResult{
+			{Chunk: store.StoredChunk{Text: "cached result", Source: "src"}, Score: 0.9},
+		},
+	}
+	me := &mockEmbedder{vectors: [][]float32{{0.1, 0.2, 0.3}}}
+	srv := NewServer(ms, me, WithCache(CacheConfig{}))
+
+	input := SearchInput{Query: "install"}
+	// First call — cache miss.
+	r1, _, _ := srv.handleSearch(ctx, &sdkmcp.CallToolRequest{}, input)
+	// Second call — cache hit.
+	r2, _, _ := srv.handleSearch(ctx, &sdkmcp.CallToolRequest{}, input)
+
+	if me.embedCalls != 1 {
+		t.Errorf("expected embedder called once, got %d", me.embedCalls)
+	}
+	if ms.searchCalls != 1 {
+		t.Errorf("expected store.Search called once, got %d", ms.searchCalls)
+	}
+	t1 := extractText(t, r1)
+	t2 := extractText(t, r2)
+	if t1 != t2 {
+		t.Errorf("cached result differs:\n  first:  %q\n  second: %q", t1, t2)
+	}
+}
+
+func TestCacheSearchMissOnDifferentQuery(t *testing.T) {
+	ctx := context.Background()
+	ms := &mockStore{
+		searchResults: []store.SearchResult{
+			{Chunk: store.StoredChunk{Text: "result", Source: "src"}, Score: 0.9},
+		},
+	}
+	me := &mockEmbedder{vectors: [][]float32{{0.1, 0.2, 0.3}}}
+	srv := NewServer(ms, me, WithCache(CacheConfig{}))
+
+	srv.handleSearch(ctx, &sdkmcp.CallToolRequest{}, SearchInput{Query: "install"})
+	srv.handleSearch(ctx, &sdkmcp.CallToolRequest{}, SearchInput{Query: "upgrade"})
+
+	if me.embedCalls != 2 {
+		t.Errorf("expected 2 embed calls for different queries, got %d", me.embedCalls)
+	}
+}
+
+func TestCacheSearchMissOnDifferentTopK(t *testing.T) {
+	ctx := context.Background()
+	ms := &mockStore{
+		searchResults: []store.SearchResult{
+			{Chunk: store.StoredChunk{Text: "result", Source: "src"}, Score: 0.9},
+		},
+	}
+	me := &mockEmbedder{vectors: [][]float32{{0.1, 0.2, 0.3}}}
+	srv := NewServer(ms, me, WithCache(CacheConfig{}))
+
+	srv.handleSearch(ctx, &sdkmcp.CallToolRequest{}, SearchInput{Query: "install"})
+	k := 10
+	srv.handleSearch(ctx, &sdkmcp.CallToolRequest{}, SearchInput{Query: "install", TopK: &k})
+
+	if me.embedCalls != 2 {
+		t.Errorf("expected 2 embed calls for different topK, got %d", me.embedCalls)
+	}
+}
+
+func TestCacheSearchMissOnDifferentSource(t *testing.T) {
+	ctx := context.Background()
+	ms := &mockStore{
+		searchResults: []store.SearchResult{
+			{Chunk: store.StoredChunk{Text: "result", Source: "src"}, Score: 0.9},
+		},
+	}
+	me := &mockEmbedder{vectors: [][]float32{{0.1, 0.2, 0.3}}}
+	srv := NewServer(ms, me, WithCache(CacheConfig{}))
+
+	srv.handleSearch(ctx, &sdkmcp.CallToolRequest{}, SearchInput{Query: "install"})
+	src := "envoy"
+	srv.handleSearch(ctx, &sdkmcp.CallToolRequest{}, SearchInput{Query: "install", Source: &src})
+
+	if me.embedCalls != 2 {
+		t.Errorf("expected 2 embed calls for different source, got %d", me.embedCalls)
+	}
+}
+
+func TestCacheEmbedErrorNotCached(t *testing.T) {
+	ctx := context.Background()
+	ms := &mockStore{}
+	me := &mockEmbedder{err: fmt.Errorf("transient error")}
+	srv := NewServer(ms, me, WithCache(CacheConfig{}))
+
+	// First call — embed error.
+	r1, _, _ := srv.handleSearch(ctx, &sdkmcp.CallToolRequest{}, SearchInput{Query: "test"})
+	if !r1.IsError {
+		t.Fatal("expected error result on first call")
+	}
+
+	// Fix the error and retry — should call embedder again.
+	me.err = nil
+	me.vectors = [][]float32{{0.1, 0.2, 0.3}}
+	r2, _, _ := srv.handleSearch(ctx, &sdkmcp.CallToolRequest{}, SearchInput{Query: "test"})
+	if r2.IsError {
+		t.Fatal("expected successful result after error fix")
+	}
+	if me.embedCalls != 2 {
+		t.Errorf("expected 2 embed calls (error not cached), got %d", me.embedCalls)
+	}
+}
+
+func TestCacheStoreErrorNotCached(t *testing.T) {
+	ctx := context.Background()
+	ms := &mockStore{searchErr: fmt.Errorf("store down")}
+	me := &mockEmbedder{vectors: [][]float32{{0.1, 0.2, 0.3}}}
+	srv := NewServer(ms, me, WithCache(CacheConfig{}))
+
+	// First call — store error.
+	r1, _, _ := srv.handleSearch(ctx, &sdkmcp.CallToolRequest{}, SearchInput{Query: "test"})
+	if !r1.IsError {
+		t.Fatal("expected error result on first call")
+	}
+
+	// Fix the error and retry — should call embedder again.
+	ms.searchErr = nil
+	ms.searchResults = []store.SearchResult{
+		{Chunk: store.StoredChunk{Text: "ok", Source: "s"}, Score: 0.9},
+	}
+	r2, _, _ := srv.handleSearch(ctx, &sdkmcp.CallToolRequest{}, SearchInput{Query: "test"})
+	if r2.IsError {
+		t.Fatal("expected successful result after store fix")
+	}
+	if me.embedCalls != 2 {
+		t.Errorf("expected 2 embed calls (store error not cached), got %d", me.embedCalls)
+	}
+}
+
+func TestCacheSearchCodeHit(t *testing.T) {
+	ctx := context.Background()
+	ms := &mockStore{
+		searchResults: []store.SearchResult{
+			{Chunk: store.StoredChunk{Text: "func main()", ChunkType: "code", Source: "r"}, Score: 0.8},
+		},
+	}
+	me := &mockEmbedder{vectors: [][]float32{{0.1, 0.2, 0.3}}}
+	srv := NewServer(ms, me, WithCache(CacheConfig{}))
+
+	input := SearchCodeInput{Query: "main"}
+	srv.handleSearchCode(ctx, &sdkmcp.CallToolRequest{}, input)
+	srv.handleSearchCode(ctx, &sdkmcp.CallToolRequest{}, input)
+
+	if me.embedCalls != 1 {
+		t.Errorf("expected 1 embed call for search_code cache hit, got %d", me.embedCalls)
+	}
+}
+
+func TestCacheSearchVsSearchCodeDistinct(t *testing.T) {
+	ctx := context.Background()
+	ms := &mockStore{
+		searchResults: []store.SearchResult{
+			{Chunk: store.StoredChunk{Text: "data", Source: "s"}, Score: 0.9},
+		},
+	}
+	me := &mockEmbedder{vectors: [][]float32{{0.1, 0.2, 0.3}}}
+	srv := NewServer(ms, me, WithCache(CacheConfig{}))
+
+	// Same query text via search and search_code should be distinct cache entries.
+	srv.handleSearch(ctx, &sdkmcp.CallToolRequest{}, SearchInput{Query: "main"})
+	srv.handleSearchCode(ctx, &sdkmcp.CallToolRequest{}, SearchCodeInput{Query: "main"})
+
+	if me.embedCalls != 2 {
+		t.Errorf("expected 2 embed calls (search vs search_code distinct), got %d", me.embedCalls)
+	}
+}
+
+func TestCacheListSourcesHit(t *testing.T) {
+	ctx := context.Background()
+	ms := &mockStore{
+		sources: []store.SourceInfo{
+			{Source: "envoy", SourceVersion: "v1.0", ChunkCount: 10},
+		},
+	}
+	srv := NewServer(ms, &mockEmbedder{}, WithCache(CacheConfig{}))
+
+	srv.handleListSources(ctx, &sdkmcp.CallToolRequest{}, ListSourcesInput{})
+	srv.handleListSources(ctx, &sdkmcp.CallToolRequest{}, ListSourcesInput{})
+
+	if ms.sourcesCalls != 1 {
+		t.Errorf("expected store.ListSources called once, got %d", ms.sourcesCalls)
+	}
+}
+
+func TestNoCacheByDefault(t *testing.T) {
+	ctx := context.Background()
+	ms := &mockStore{
+		searchResults: []store.SearchResult{
+			{Chunk: store.StoredChunk{Text: "data", Source: "s"}, Score: 0.9},
+		},
+	}
+	me := &mockEmbedder{vectors: [][]float32{{0.1, 0.2, 0.3}}}
+	srv := NewServer(ms, me) // No WithCache option.
+
+	input := SearchInput{Query: "install"}
+	srv.handleSearch(ctx, &sdkmcp.CallToolRequest{}, input)
+	srv.handleSearch(ctx, &sdkmcp.CallToolRequest{}, input)
+
+	if me.embedCalls != 2 {
+		t.Errorf("without cache, expected embedder called every time, got %d", me.embedCalls)
+	}
+}
+
+func TestCacheConcurrentAccess(t *testing.T) {
+	ctx := context.Background()
+	ms := &mockStore{
+		searchResults: []store.SearchResult{
+			{Chunk: store.StoredChunk{Text: "data", Source: "s"}, Score: 0.9},
+		},
+	}
+	me := &mockEmbedder{vectors: [][]float32{{0.1, 0.2, 0.3}}}
+	srv := NewServer(ms, me, WithCache(CacheConfig{}))
+
+	done := make(chan struct{})
+	for i := 0; i < 10; i++ {
+		go func() {
+			defer func() { done <- struct{}{} }()
+			srv.handleSearch(ctx, &sdkmcp.CallToolRequest{}, SearchInput{Query: "concurrent"})
+		}()
+	}
+	for i := 0; i < 10; i++ {
+		<-done
+	}
+	// If we get here without a race/panic, the test passes.
 }

@@ -30,15 +30,27 @@ type SearchCodeInput struct {
 // ListSourcesInput defines the input schema for the list_sources tool.
 type ListSourcesInput struct{}
 
+// ServerOption configures optional Server behavior.
+type ServerOption func(*Server)
+
+// WithCache enables a TTL-based LRU result cache. Zero-value fields in cfg
+// are replaced with defaults (256 entries, 5 min TTL).
+func WithCache(cfg CacheConfig) ServerOption {
+	return func(s *Server) {
+		s.cache = newResultCache(cfg)
+	}
+}
+
 // Server wraps the MCP server with mycelium-specific tool handlers.
 type Server struct {
 	store    store.Store
 	embedder embedder.Embedder
 	server   *mcp.Server
+	cache    *resultCache // nil when caching is disabled
 }
 
 // NewServer creates a new MCP server with search and list_sources tools.
-func NewServer(st store.Store, emb embedder.Embedder) *Server {
+func NewServer(st store.Store, emb embedder.Embedder, opts ...ServerOption) *Server {
 	s := &Server{
 		store:    st,
 		embedder: emb,
@@ -46,6 +58,10 @@ func NewServer(st store.Store, emb embedder.Embedder) *Server {
 			Name:    "mycelium",
 			Version: "v0.1.0",
 		}, nil),
+	}
+
+	for _, opt := range opts {
+		opt(s)
 	}
 
 	mcp.AddTool(s.server, &mcp.Tool{
@@ -72,48 +88,34 @@ func (s *Server) Serve(ctx context.Context) error {
 }
 
 func (s *Server) handleSearch(ctx context.Context, _ *mcp.CallToolRequest, input SearchInput) (*mcp.CallToolResult, any, error) {
-	vectors, err := s.embedder.Embed(ctx, []string{input.Query})
-	if err != nil {
-		return errResult(fmt.Sprintf("embed query: %v", err)), nil, nil
-	}
-
-	opts := store.SearchOpts{TopK: defaultTopK}
+	topK := defaultTopK
 	if input.TopK != nil {
-		opts.TopK = *input.TopK
+		topK = *input.TopK
 	}
+	var source, chunkType string
 	if input.Source != nil {
-		opts.Source = *input.Source
+		source = *input.Source
 	}
 	if input.Type != nil {
-		opts.ChunkType = *input.Type
+		chunkType = *input.Type
 	}
 
-	results, err := s.store.Search(ctx, vectors[0], opts)
-	if err != nil {
-		return errResult(fmt.Sprintf("search: %v", err)), nil, nil
+	if s.cache != nil {
+		key := searchKey(input.Query, source, chunkType, topK)
+		if cached, ok := s.cache.lru.Get(key); ok {
+			return textResult(cached), nil, nil
+		}
 	}
 
-	return textResult(formatSearchResults(results)), nil, nil
-}
-
-func (s *Server) handleSearchCode(ctx context.Context, _ *mcp.CallToolRequest, input SearchCodeInput) (*mcp.CallToolResult, any, error) {
 	vectors, err := s.embedder.Embed(ctx, []string{input.Query})
 	if err != nil {
 		return errResult(fmt.Sprintf("embed query: %v", err)), nil, nil
 	}
 
 	opts := store.SearchOpts{
-		TopK:      defaultTopK,
-		ChunkType: "code",
-	}
-	if input.TopK != nil {
-		opts.TopK = *input.TopK
-	}
-	if input.Source != nil {
-		opts.Source = *input.Source
-	}
-	if input.Language != nil {
-		opts.Language = *input.Language
+		TopK:      topK,
+		Source:    source,
+		ChunkType: chunkType,
 	}
 
 	results, err := s.store.Search(ctx, vectors[0], opts)
@@ -121,16 +123,80 @@ func (s *Server) handleSearchCode(ctx context.Context, _ *mcp.CallToolRequest, i
 		return errResult(fmt.Sprintf("search: %v", err)), nil, nil
 	}
 
-	return textResult(formatSearchResults(results)), nil, nil
+	formatted := formatSearchResults(results)
+	if s.cache != nil {
+		key := searchKey(input.Query, source, chunkType, topK)
+		s.cache.lru.Add(key, formatted)
+	}
+
+	return textResult(formatted), nil, nil
+}
+
+func (s *Server) handleSearchCode(ctx context.Context, _ *mcp.CallToolRequest, input SearchCodeInput) (*mcp.CallToolResult, any, error) {
+	topK := defaultTopK
+	if input.TopK != nil {
+		topK = *input.TopK
+	}
+	var source, language string
+	if input.Source != nil {
+		source = *input.Source
+	}
+	if input.Language != nil {
+		language = *input.Language
+	}
+
+	if s.cache != nil {
+		key := searchCodeKey(input.Query, source, language, topK)
+		if cached, ok := s.cache.lru.Get(key); ok {
+			return textResult(cached), nil, nil
+		}
+	}
+
+	vectors, err := s.embedder.Embed(ctx, []string{input.Query})
+	if err != nil {
+		return errResult(fmt.Sprintf("embed query: %v", err)), nil, nil
+	}
+
+	opts := store.SearchOpts{
+		TopK:      topK,
+		ChunkType: "code",
+		Source:    source,
+		Language:  language,
+	}
+
+	results, err := s.store.Search(ctx, vectors[0], opts)
+	if err != nil {
+		return errResult(fmt.Sprintf("search: %v", err)), nil, nil
+	}
+
+	formatted := formatSearchResults(results)
+	if s.cache != nil {
+		key := searchCodeKey(input.Query, source, language, topK)
+		s.cache.lru.Add(key, formatted)
+	}
+
+	return textResult(formatted), nil, nil
 }
 
 func (s *Server) handleListSources(ctx context.Context, _ *mcp.CallToolRequest, _ ListSourcesInput) (*mcp.CallToolResult, any, error) {
+	if s.cache != nil {
+		key := listSourcesKey()
+		if cached, ok := s.cache.lru.Get(key); ok {
+			return textResult(cached), nil, nil
+		}
+	}
+
 	sources, err := s.store.ListSources(ctx)
 	if err != nil {
 		return errResult(fmt.Sprintf("list sources: %v", err)), nil, nil
 	}
 
-	return textResult(formatSourceList(sources)), nil, nil
+	formatted := formatSourceList(sources)
+	if s.cache != nil {
+		s.cache.lru.Add(listSourcesKey(), formatted)
+	}
+
+	return textResult(formatted), nil, nil
 }
 
 func textResult(text string) *mcp.CallToolResult {

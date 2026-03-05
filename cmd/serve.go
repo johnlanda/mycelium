@@ -37,7 +37,7 @@ var serveCmd = &cobra.Command{
 		}
 		defer st.Close()
 
-		srv := mcpserver.NewServer(st, cachedEmb)
+		srv := mcpserver.NewServer(st, cachedEmb, mcpserver.WithCache(mcpserver.CacheConfig{}))
 		return srv.Serve(cmd.Context())
 	},
 }
