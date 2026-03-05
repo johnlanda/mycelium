@@ -1,0 +1,1 @@
+What authentication methods does Envoy Gateway v1.3.0 support in its SecurityPolicy CRD? For each method, list the Go type name from the api/v1alpha1 package. Pay special attention to API Key authentication — explain the full configuration including how API keys are stored, extraction sources (headers, query params, cookies), and exact field names from the Go type definitions.

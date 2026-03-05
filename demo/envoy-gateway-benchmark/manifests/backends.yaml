@@ -1,0 +1,23 @@
+# Backend: Primary API endpoint (FQDN-based)
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: Backend
+metadata:
+  name: api-backend
+  namespace: default
+spec:
+  endpoints:
+    - fqdn:
+        hostname: api.example.com
+        port: 443
+---
+# Backend: Fallback API endpoint (FQDN-based)
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: Backend
+metadata:
+  name: fallback-api-backend
+  namespace: default
+spec:
+  endpoints:
+    - fqdn:
+        hostname: fallback-api.example.com
+        port: 443

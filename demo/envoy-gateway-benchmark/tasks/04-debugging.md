@@ -1,0 +1,1 @@
+A SecurityPolicy has authorization rules: (1) allow-internal for 10.0.0.0/8, (2) allow-jwt-admin requiring JWT with role=admin, (3) deny-external for 0.0.0.0/0. A request from 10.1.2.3 WITHOUT a JWT is being ALLOWED. Why? Explain the rule evaluation model (first-match semantics vs AND within Principal) and how to fix it.

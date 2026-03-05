@@ -1,0 +1,11 @@
+[config]
+embedding_model = "ollama/qwen3-embedding"
+embedding_dimensions = 1024
+
+[[dependencies]]
+id = "envoy-gateway"
+source = "github.com/envoyproxy/gateway"
+ref = "v1.3.0"
+docs = ["site/content/en/v1.3"]
+code = ["api/v1alpha1"]
+code_extensions = [".go"]

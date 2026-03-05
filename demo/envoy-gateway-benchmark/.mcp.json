@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "mycelium": {
+      "command": "mctl",
+      "args": ["serve"],
+      "cwd": "."
+    }
+  }
+}

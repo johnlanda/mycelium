@@ -30,7 +30,7 @@ The lockfile (`mycelium.lock`) guarantees that two developers with the same lock
 ### Prerequisites
 
 - Go 1.25+
-- An embedding API key (Voyage AI, OpenAI, or a local Ollama instance)
+- An embedding provider: Voyage AI API key, OpenAI API key, or a local [Ollama](https://ollama.com/) instance
 
 ### Install
 
@@ -49,7 +49,7 @@ make build           # Build the mctl binary
 mctl init
 ```
 
-This creates `mycelium.toml` with sensible defaults (Voyage AI `voyage-code-2` as the embedding model).
+This creates `mycelium.toml` with sensible defaults.
 
 ### Add Dependencies
 
@@ -122,6 +122,7 @@ Your agent now has access to three tools:
 ```toml
 [config]
 embedding_model = "voyage-code-2"   # Required: voyage-code-2, text-embedding-3-small, or ollama/<model>
+embedding_dimensions = 0             # Optional: override vector dimensions (0 = auto-detect, useful for Ollama)
 publish = "github-releases"          # Optional: where mctl publish uploads artifacts
 
 [local]
@@ -134,7 +135,7 @@ source = "github.com/envoyproxy/gateway"
 ref = "v1.3.0"
 docs = ["site/content"]              # Markdown documentation paths
 code = ["api/v1alpha1"]              # Source code paths
-code_extensions = [".go"]            # File types to index (default: .go, .py, .ts, .js, .java, .rs)
+code_extensions = [".go"]            # File types to index (default: .go, .py, .ts, .tsx, .js, .jsx, .java, .rs)
 ```
 
 ## Lockfile
@@ -144,19 +145,20 @@ code_extensions = [".go"]            # File types to index (default: .go, .py, .
 ```toml
 [meta]
 mycelium_version = "0.1.0"
-embedding_model = "voyage-code-2"
-locked_at = "2026-03-04T14:30:00Z"
+embedding_model = "ollama/qwen3-embedding"
+embedding_model_version = ""
+locked_at = "2026-03-05T15:43:51Z"
 schema_version = 1
 
 [sources.envoy-gateway]
 version = "v1.3.0"
-commit = "8f3a2b1c9d4e..."
-content_hash = "sha256:3f8a..."
-artifact_url = "https://github.com/envoyproxy/gateway/releases/download/v1.3.0/mycelium-voyage-code-2.jsonl.gz"
-artifact_hash = "sha256:9d2c..."
-store_key = "sha256:a1b2..."
-ingestion_type = "artifact"
+commit = "76e714e12b75cc20a0de5edd6e89fcfea231444d"
+content_hash = "sha256:953a00be..."
+store_key = "sha256:4a8b8979..."
+ingestion_type = "built"
 ```
+
+When a pre-built artifact is available, the lockfile also includes `artifact_url` and `artifact_hash` fields, and `ingestion_type` is `"artifact"` instead of `"built"`.
 
 The `store_key` is a content-addressed hash of `(content_hash + embedding_model + chunking_config)`. Two projects that compute the same `store_key` reference identical data.
 
@@ -168,15 +170,15 @@ Mycelium uses two chunking strategies, selected automatically by file type:
 
 **Source code** — AST-aware chunking via [tree-sitter](https://tree-sitter.github.io/tree-sitter/). Code is split along semantically meaningful boundaries — function definitions, type declarations, interface definitions, method implementations — rather than arbitrary token counts.
 
-Supported languages: Go, Python, TypeScript/JavaScript, Java, Rust.
+Supported languages: Go, Python, TypeScript/TSX, JavaScript/JSX, Java, Rust.
 
 ## Embedding Providers
 
-| Provider | Model | Notes |
-|----------|-------|-------|
-| Voyage AI | `voyage-code-2` | Default. Optimized for code and technical documentation. |
-| OpenAI | `text-embedding-3-small` | Widely available alternative. |
-| Ollama | `ollama/<model>` | Fully offline, no API key required. |
+| Provider | Model | Dimensions | Notes |
+|----------|-------|------------|-------|
+| Voyage AI | `voyage-code-2` | 1536 | Optimized for code and technical documentation. |
+| OpenAI | `text-embedding-3-small` | 1536 | Widely available alternative. |
+| Ollama | `ollama/<model>` | Auto-detected | Fully offline, no API key required. Set `embedding_dimensions` in manifest to override. |
 
 ## Publishing Artifacts
 
@@ -251,6 +253,9 @@ make build
 # Test
 make test
 
+# End-to-end tests (requires Ollama)
+make test-e2e
+
 # Vet
 make vet
 
@@ -301,7 +306,9 @@ mycelium/
 │   ├── manifest/             # mycelium.toml parsing and validation
 │   ├── mcp/                  # MCP server (search, search_code, list_sources)
 │   ├── pipeline/             # Orchestrates fetch → chunk → embed → upsert
-│   └── store/                # Vector store abstraction (LanceDB)
+│   └── store/                # Vector store abstraction (LanceDB embedded)
+├── e2e/                      # End-to-end tests (build tag: e2e)
+├── demo/                     # Benchmark and demo projects
 ├── mycelium.toml             # Project manifest (committed)
 ├── mycelium.lock             # Lockfile (committed, never hand-edited)
 └── go.mod
@@ -309,4 +316,4 @@ mycelium/
 
 ## License
 
-TBD
+[MIT](LICENSE)
