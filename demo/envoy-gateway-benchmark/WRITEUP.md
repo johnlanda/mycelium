@@ -197,8 +197,8 @@ This section explains what each statistical measure means and how to interpret t
 
 **Interpretation thresholds** (Romano et al., 2006):
 
-| |d| Range | Interpretation | Meaning |
-|------------|----------------|---------|
+| \|d\| Range | Interpretation | Meaning |
+|--------------|----------------|---------|
 | < 0.147 | Negligible | Conditions are practically equivalent |
 | 0.147–0.330 | Small | Detectable but minor difference |
 | 0.330–0.474 | Medium | Meaningful difference in practice |
