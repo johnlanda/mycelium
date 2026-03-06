@@ -1,0 +1,87 @@
+task_id: "05-extproc"
+category: "mixed"
+version: 1
+
+required_facts:
+  - pattern: "gateway\\.envoyproxy\\.io/v1alpha1"
+    description: "Correct apiVersion"
+    weight: 1
+  - pattern: "kind:\\s*EnvoyExtensionPolicy"
+    description: "EnvoyExtensionPolicy kind"
+    weight: 1.5
+  - pattern: "extProc|ext_proc"
+    description: "ext_proc configuration"
+    weight: 1.5
+  - pattern: "auth-enrichment"
+    description: "Service name auth-enrichment"
+    weight: 1
+  - pattern: "ext-proc-system"
+    description: "Correct namespace"
+    weight: 1
+  - pattern: "9001"
+    description: "Port 9001"
+    weight: 1
+  - pattern: "500ms|messageTimeout"
+    description: "500ms timeout"
+    weight: 1
+  - pattern: "failOpen.*true|true.*failOpen"
+    description: "Fail-open enabled"
+    weight: 1
+  - pattern: "Buffered"
+    description: "Buffered body processing mode"
+    weight: 1.5
+  - pattern: "Streamed"
+    description: "Explains Streamed mode"
+    weight: 1
+  - pattern: "BufferedPartial"
+    description: "Explains BufferedPartial mode"
+    weight: 1
+  - pattern: "envoy\\.filters\\.http\\.jwt_authn"
+    description: "JWT metadata namespace"
+    weight: 1
+  - pattern: "com\\.example\\.auth"
+    description: "Writable metadata namespace"
+    weight: 1
+  - pattern: "processingMode"
+    description: "Processing mode configuration"
+    weight: 1
+  - pattern: "metadataOptions|MetadataOptions"
+    description: "Metadata options configuration"
+    weight: 1
+
+structure_checks:
+  - type: "contains_code_block"
+    description: "Response includes YAML code block"
+  - type: "no_yaml_errors"
+    description: "YAML is syntactically valid"
+    applies_to: "yaml"
+  - type: "api_version"
+    description: "Correct apiVersion"
+    expected: "gateway.envoyproxy.io/v1alpha1"
+  - type: "kind"
+    description: "EnvoyExtensionPolicy kind"
+    expected: "EnvoyExtensionPolicy"
+  - type: "required_field"
+    description: "extProc field present"
+    field: "spec.extProc"
+
+judge_criteria: |
+  Evaluate the EnvoyExtensionPolicy YAML and body processing explanation.
+  Check:
+  1. Is the YAML structurally correct for EnvoyExtensionPolicy?
+  2. Does extProc use backendRefs (not backendRef) with correct service details?
+  3. Is messageTimeout set to 500ms and failOpen: true?
+  4. Is processingMode configured with request body: Buffered and response
+     body not sent?
+  5. Are metadataOptions configured with receivingNamespaces (jwt_authn)
+     and writableNamespaces (com.example.auth)?
+  6. Are all three body modes explained (Streamed, Buffered, BufferedPartial)?
+  7. Is the explanation of each mode accurate?
+  Score 1-5 where:
+    1 = Wrong resource type or fundamentally broken YAML
+    2 = Correct kind but major field errors, missing mode explanation
+    3 = Mostly correct YAML, explains some modes
+    4 = Correct YAML and mode explanations, minor issues
+    5 = Perfect YAML and comprehensive mode explanations
+
+reference_answer_file: "tasks/05-extproc.reference.md"

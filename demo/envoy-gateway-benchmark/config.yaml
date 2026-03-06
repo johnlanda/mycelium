@@ -1,0 +1,11 @@
+repetitions: 5
+model: "claude-sonnet-4-5-20250929"
+cool_down_seconds: 30
+warm_up_reps: 1
+tasks: ["01-discovery", "02-codegen", "03-config", "04-debugging", "05-extproc"]
+max_retries: 3
+retry_backoff_base: 60
+judge_model: null        # null = use default claude
+judge_num_calls: 1       # 1 or 3 (median)
+seed: null               # null = auto-generate
+quality_weights: {fact: 0.3, structure: 0.3, judge: 0.4}

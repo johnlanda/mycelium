@@ -26,7 +26,7 @@ CGO_CFLAGS := -I$(LANCEDB_MOD)/include
 export CGO_CFLAGS
 export CGO_LDFLAGS
 
-.PHONY: build test test-e2e tidy vet setup-lancedb clean
+.PHONY: build test test-e2e bench tidy vet setup-lancedb clean
 
 build: ## Build the mctl binary
 	go build -o mctl .
@@ -36,6 +36,9 @@ test: ## Run all tests
 
 test-e2e: ## Run end-to-end tests
 	go test -tags e2e ./e2e/ -v
+
+bench: ## Run all benchmarks
+	go test -bench=. -benchmem ./...
 
 tidy: ## Tidy Go modules
 	go mod tidy

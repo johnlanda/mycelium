@@ -1,0 +1,65 @@
+task_id: "04-debugging"
+category: "debugging"
+version: 1
+
+required_facts:
+  - pattern: "first.match|first-match|first match"
+    description: "Identifies first-match rule evaluation"
+    weight: 2
+  - pattern: "allow-internal|Rule 1|rule 1|first rule"
+    description: "Identifies allow-internal as the matching rule"
+    weight: 1.5
+  - pattern: "10\\.0\\.0\\.0/8"
+    description: "References the CIDR range"
+    weight: 1
+  - pattern: "10\\.1\\.2\\.3"
+    description: "References the request source IP"
+    weight: 1
+  - pattern: "evaluation stop|never evaluated|short.circuit|stops? (at|here|evaluating)"
+    description: "Explains that later rules are never reached"
+    weight: 1.5
+  - pattern: "defaultAction|DefaultAction"
+    description: "Mentions defaultAction for fix"
+    weight: 1
+  - pattern: "Deny"
+    description: "Mentions Deny as default action"
+    weight: 1
+  - pattern: "AND|both|combine"
+    description: "Suggests combining conditions with AND logic"
+    weight: 1.5
+  - pattern: "Principal|principal"
+    description: "References Principal in authorization rules"
+    weight: 1
+  - pattern: "sourceIP|clientCIDR|SourceIP"
+    description: "References source IP matching mechanism"
+    weight: 0.5
+  - pattern: "Authorization|AuthorizationRule"
+    description: "References Authorization types"
+    weight: 0.5
+
+structure_checks:
+  - type: "contains_code_block"
+    description: "Response includes code examples"
+  - type: "no_yaml_errors"
+    description: "Any YAML examples are syntactically valid"
+    applies_to: "yaml"
+
+judge_criteria: |
+  Evaluate the debugging response about SecurityPolicy authorization rules.
+  Check:
+  1. Does it correctly identify first-match semantics as the root cause?
+  2. Does it explain that allow-internal matches 10.1.2.3 (in 10.0.0.0/8)
+     and evaluation stops before the JWT rule is checked?
+  3. Does it explain the difference between AND logic within a rule vs
+     first-match across rules?
+  4. Does it provide at least one valid fix (e.g., combining conditions in
+     a single rule, or reordering with defaultAction: Deny)?
+  5. Is the fix YAML syntactically valid and logically correct?
+  Score 1-5 where:
+    1 = Wrong diagnosis or doesn't identify the actual issue
+    2 = Partially correct but misses first-match semantics
+    3 = Correct diagnosis, weak or incorrect fix
+    4 = Correct diagnosis with valid fix, minor issues
+    5 = Perfect diagnosis with clear explanation and correct fix
+
+reference_answer_file: "tasks/04-debugging.reference.md"

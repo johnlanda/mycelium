@@ -1,0 +1,65 @@
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: ClientTrafficPolicy
+metadata:
+  name: eg-client-policy
+  namespace: default
+spec:
+  # Target the Gateway named "eg"
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: eg
+
+  # Enable HTTP/3
+  # Go type: *egv1a1.HTTP3Settings
+  http3: {}
+
+  # Header configuration
+  # Go type: *egv1a1.HeaderSettings
+  headers:
+    # Configure XFCC (X-Forwarded-Client-Cert) header handling
+    # Go type: *egv1a1.XForwardedClientCert
+    xForwardedClientCert:
+      # Mode: SanitizeSet (sanitize XFCC header and set it with client cert info)
+      # Go type: egv1a1.XFCCForwardType
+      # Enum values: Sanitize | AppendForward | SanitizeSet | AlwaysForwardOnly
+      mode: SanitizeSet
+      # Certificate details to add to the XFCC header
+      # Go type: []egv1a1.XFCCCertData
+      # Enum values: Subject | Cert | Chain | DNS | URI
+      certDetailsToAdd:
+        - Subject
+        - DNS
+        - URI
+
+    # Reject HTTP headers with underscores
+    # Go type: *egv1a1.WithUnderscoresAction
+    # Enum values: Allow | RejectRequest | DropHeader
+    withUnderscoresAction: RejectRequest
+
+    # Disable X-RateLimit-* headers from Envoy
+    # Go type: *bool
+    # Default: false (headers disabled), set to true to enable
+    enableEnvoyHeaders: false
+
+    # Early request header modification (before routing/tracing)
+    # Go type: *egv1a1.HeaderModifier
+    earlyRequestHeaders:
+      # Set the X-Request-Start header with Envoy format string
+      # %START_TIME% expands to request start time
+      set:
+        - name: X-Request-Start
+          value: "%START_TIME%"
+
+  # TCP keepalive configuration
+  # Go type: *egv1a1.TCPKeepalive
+  tcpKeepalive:
+    # Idle time before sending keepalive probes
+    # Go type: *gwapiv1.Duration
+    idleTime: 60s
+    # Interval between keepalive probes
+    # Go type: *gwapiv1.Duration
+    interval: 30s
+    # Number of unacknowledged probes before considering connection dead
+    # Go type: *uint32
+    probes: 3

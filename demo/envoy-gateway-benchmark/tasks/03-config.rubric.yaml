@@ -1,0 +1,92 @@
+task_id: "03-config"
+category: "configuration"
+version: 1
+
+required_facts:
+  - pattern: "gateway\\.envoyproxy\\.io/v1alpha1"
+    description: "Correct apiVersion"
+    weight: 1.5
+  - pattern: "kind:\\s*ClientTrafficPolicy"
+    description: "ClientTrafficPolicy kind"
+    weight: 1.5
+  - pattern: "http3"
+    description: "HTTP/3 configuration"
+    weight: 1
+  - pattern: "xForwardedClientCert|XForwardedClientCert|XFCC"
+    description: "XFCC header configuration"
+    weight: 1
+  - pattern: "SanitizeSet"
+    description: "SanitizeSet mode for XFCC"
+    weight: 1.5
+  - pattern: "withUnderscoresAction|WithUnderscoresAction"
+    description: "Header underscore handling"
+    weight: 1
+  - pattern: "RejectRequest"
+    description: "RejectRequest action for underscores"
+    weight: 1
+  - pattern: "disableRateLimitHeaders|DisableRateLimitHeaders"
+    description: "Disable X-RateLimit headers"
+    weight: 1
+  - pattern: "tcpKeepalive|TCPKeepalive"
+    description: "TCP keepalive configuration"
+    weight: 1
+  - pattern: "idleTime.*60|60.*idleTime"
+    description: "60s idle time for keepalive"
+    weight: 1
+  - pattern: "interval.*30|30.*interval"
+    description: "30s interval for keepalive"
+    weight: 1
+  - pattern: "probes.*3|3.*probes"
+    description: "3 keepalive probes"
+    weight: 1
+  - pattern: "earlyRequestHeaders|EarlyRequestHeaders"
+    description: "Early request header modification"
+    weight: 1.5
+  - pattern: "X-Request-Start"
+    description: "X-Request-Start header name"
+    weight: 1
+  - pattern: "%START_TIME%"
+    description: "START_TIME variable for header value"
+    weight: 1
+
+structure_checks:
+  - type: "contains_code_block"
+    description: "Response includes YAML code block"
+  - type: "no_yaml_errors"
+    description: "YAML is syntactically valid"
+    applies_to: "yaml"
+  - type: "api_version"
+    description: "Correct apiVersion"
+    expected: "gateway.envoyproxy.io/v1alpha1"
+  - type: "kind"
+    description: "ClientTrafficPolicy kind"
+    expected: "ClientTrafficPolicy"
+  - type: "required_field"
+    description: "HTTP3 field present"
+    field: "spec.http3"
+  - type: "required_field"
+    description: "Headers field present"
+    field: "spec.headers"
+  - type: "required_field"
+    description: "TCP keepalive field present"
+    field: "spec.tcpKeepalive"
+
+judge_criteria: |
+  Evaluate the ClientTrafficPolicy YAML for Envoy Gateway v1.3.0 correctness.
+  Check:
+  1. Targets Gateway "eg" correctly via targetRef?
+  2. HTTP/3 enabled (http3: {} is sufficient)?
+  3. XFCC configured with mode: SanitizeSet?
+  4. withUnderscoresAction: RejectRequest in headers section?
+  5. disableRateLimitHeaders: true?
+  6. TCP keepalive with idleTime: 60s, interval: 30s, probes: 3?
+  7. earlyRequestHeaders with X-Request-Start set to %START_TIME%?
+  8. Are Go type references accurate?
+  Score 1-5 where:
+    1 = Missing most configurations or fundamentally wrong structure
+    2 = Some configs present but wrong field names/nesting
+    3 = Most configs correct, 1-2 wrong field names
+    4 = All configs present, minor formatting issues
+    5 = Perfect YAML matching v1.3.0 types exactly
+
+reference_answer_file: "tasks/03-config.reference.md"

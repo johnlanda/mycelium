@@ -496,6 +496,78 @@ func TestNoCacheByDefault(t *testing.T) {
 	}
 }
 
+func TestBuildToolDescriptionsWithSources(t *testing.T) {
+	sources := []store.SourceInfo{
+		{Source: "envoy-gateway", SourceVersion: "v1.3.0", ChunkCount: 423},
+	}
+
+	search, searchCode, listSources := buildToolDescriptions(sources)
+
+	if !strings.Contains(search, "envoy-gateway @ v1.3.0 (423 chunks)") {
+		t.Errorf("search description missing source info: %s", search)
+	}
+	if !strings.Contains(search, "CRD specifications") {
+		t.Errorf("search description missing usage hints: %s", search)
+	}
+
+	if !strings.Contains(searchCode, "envoy-gateway @ v1.3.0 (423 chunks)") {
+		t.Errorf("search_code description missing source info: %s", searchCode)
+	}
+	if !strings.Contains(searchCode, "Go type definitions") {
+		t.Errorf("search_code description missing usage hints: %s", searchCode)
+	}
+
+	if !strings.Contains(listSources, "versions and chunk counts") {
+		t.Errorf("list_sources description missing enrichment: %s", listSources)
+	}
+}
+
+func TestBuildToolDescriptionsWithoutSources(t *testing.T) {
+	search, searchCode, listSources := buildToolDescriptions(nil)
+
+	if search != defaultSearchDesc {
+		t.Errorf("expected default search desc, got: %s", search)
+	}
+	if searchCode != defaultSearchCodeDesc {
+		t.Errorf("expected default search_code desc, got: %s", searchCode)
+	}
+	if listSources != defaultListSourceDesc {
+		t.Errorf("expected default list_sources desc, got: %s", listSources)
+	}
+}
+
+func TestBuildToolDescriptionsMultipleSources(t *testing.T) {
+	sources := []store.SourceInfo{
+		{Source: "envoy-gateway", SourceVersion: "v1.3.0", ChunkCount: 423},
+		{Source: "istio", SourceVersion: "v1.20.0", ChunkCount: 150},
+	}
+
+	search, _, _ := buildToolDescriptions(sources)
+
+	if !strings.Contains(search, "envoy-gateway @ v1.3.0 (423 chunks)") {
+		t.Errorf("search description missing first source: %s", search)
+	}
+	if !strings.Contains(search, "istio @ v1.20.0 (150 chunks)") {
+		t.Errorf("search description missing second source: %s", search)
+	}
+}
+
+func TestWithSourceContextOption(t *testing.T) {
+	sources := []store.SourceInfo{
+		{Source: "envoy-gateway", SourceVersion: "v1.3.0", ChunkCount: 423},
+	}
+	ms := &mockStore{}
+	me := &mockEmbedder{vectors: [][]float32{{0.1, 0.2, 0.3}}}
+	srv := NewServer(ms, me, WithSourceContext(sources))
+
+	if len(srv.sources) != 1 {
+		t.Fatalf("expected 1 source, got %d", len(srv.sources))
+	}
+	if srv.sources[0].Source != "envoy-gateway" {
+		t.Errorf("expected source 'envoy-gateway', got %q", srv.sources[0].Source)
+	}
+}
+
 func TestCacheConcurrentAccess(t *testing.T) {
 	ctx := context.Background()
 	ms := &mockStore{

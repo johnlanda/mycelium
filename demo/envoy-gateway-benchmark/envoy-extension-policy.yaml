@@ -1,0 +1,27 @@
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: EnvoyExtensionPolicy
+metadata:
+  name: auth-enrichment-extproc
+  namespace: default
+spec:
+  targetRef:
+    group: gateway.networking.k8s.io
+    kind: HTTPRoute
+    name: backend
+  extProc:
+    - backendRefs:
+        - name: auth-enrichment
+          namespace: ext-proc-system
+          port: 9001
+      failOpen: true
+      processingMode:
+        request:
+          body: Buffered
+        response:
+          body: None
+      messageTimeout: 500ms
+      metadataOptions:
+        receivedMetadata:
+          - namespace: envoy.filters.http.jwt_authn
+        writableMetadata:
+          - namespace: com.example.auth

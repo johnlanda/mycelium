@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/johnlanda/mycelium/internal/embedder"
 	"github.com/johnlanda/mycelium/internal/store"
@@ -10,6 +11,13 @@ import (
 )
 
 const defaultTopK = 5
+
+// Default tool descriptions used when no source context is available.
+const (
+	defaultSearchDesc     = "Search indexed documentation and code by semantic similarity"
+	defaultSearchCodeDesc = "Search indexed source code by semantic similarity"
+	defaultListSourceDesc = "List all indexed dependency sources"
+)
 
 // SearchInput defines the input schema for the search tool.
 type SearchInput struct {
@@ -41,12 +49,21 @@ func WithCache(cfg CacheConfig) ServerOption {
 	}
 }
 
+// WithSourceContext enriches tool descriptions with metadata about indexed
+// sources so that agents understand what content is searchable.
+func WithSourceContext(sources []store.SourceInfo) ServerOption {
+	return func(s *Server) {
+		s.sources = sources
+	}
+}
+
 // Server wraps the MCP server with mycelium-specific tool handlers.
 type Server struct {
 	store    store.Store
 	embedder embedder.Embedder
 	server   *mcp.Server
-	cache    *resultCache // nil when caching is disabled
+	cache    *resultCache      // nil when caching is disabled
+	sources  []store.SourceInfo // optional source metadata for enriched descriptions
 }
 
 // NewServer creates a new MCP server with search and list_sources tools.
@@ -64,19 +81,21 @@ func NewServer(st store.Store, emb embedder.Embedder, opts ...ServerOption) *Ser
 		opt(s)
 	}
 
+	searchDesc, searchCodeDesc, listSourcesDesc := buildToolDescriptions(s.sources)
+
 	mcp.AddTool(s.server, &mcp.Tool{
 		Name:        "search",
-		Description: "Search indexed documentation and code by semantic similarity",
+		Description: searchDesc,
 	}, s.handleSearch)
 
 	mcp.AddTool(s.server, &mcp.Tool{
 		Name:        "search_code",
-		Description: "Search indexed source code by semantic similarity",
+		Description: searchCodeDesc,
 	}, s.handleSearchCode)
 
 	mcp.AddTool(s.server, &mcp.Tool{
 		Name:        "list_sources",
-		Description: "List all indexed dependency sources",
+		Description: listSourcesDesc,
 	}, s.handleListSources)
 
 	return s
@@ -210,4 +229,49 @@ func errResult(text string) *mcp.CallToolResult {
 		Content: []mcp.Content{&mcp.TextContent{Text: text}},
 		IsError: true,
 	}
+}
+
+// buildToolDescriptions returns enriched tool descriptions when source context
+// is available, otherwise returns the static defaults.
+func buildToolDescriptions(sources []store.SourceInfo) (search, searchCode, listSources string) {
+	if len(sources) == 0 {
+		return defaultSearchDesc, defaultSearchCodeDesc, defaultListSourceDesc
+	}
+
+	sourceList := formatSourceSummary(sources)
+
+	search = fmt.Sprintf(
+		"Search indexed dependency documentation and source code by semantic similarity.\n"+
+			"Currently indexed sources: %s.\n"+
+			"Use this to look up API types, CRD specifications, configuration fields, and usage patterns.\n"+
+			"Supports filtering by source name and chunk type (doc or code).",
+		sourceList,
+	)
+
+	searchCode = fmt.Sprintf(
+		"Search indexed source code (Go types, function signatures, struct definitions) by semantic similarity.\n"+
+			"Currently indexed: %s.\n"+
+			"Use this to find exact Go type definitions, field names, enum values, and type relationships.\n"+
+			"Supports filtering by source name and programming language.",
+		sourceList,
+	)
+
+	listSources = "List all indexed dependency sources with their versions and chunk counts.\n" +
+		"Call this first to discover what documentation and code is available for search."
+
+	return search, searchCode, listSources
+}
+
+// formatSourceSummary builds a compact string like "envoy-gateway @ v1.3.0 (423 chunks)".
+func formatSourceSummary(sources []store.SourceInfo) string {
+	parts := make([]string, 0, len(sources))
+	for _, s := range sources {
+		entry := s.Source
+		if s.SourceVersion != "" {
+			entry += " @ " + s.SourceVersion
+		}
+		entry += fmt.Sprintf(" (%d chunks)", s.ChunkCount)
+		parts = append(parts, entry)
+	}
+	return strings.Join(parts, ", ")
 }

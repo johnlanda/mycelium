@@ -1,0 +1,93 @@
+task_id: "02-codegen"
+category: "code_generation"
+version: 1
+
+required_facts:
+  - pattern: "gateway\\.envoyproxy\\.io/v1alpha1"
+    description: "Correct apiVersion"
+    weight: 2
+  - pattern: "kind:\\s*Backend"
+    description: "Backend resource kind"
+    weight: 1.5
+  - pattern: "kind:\\s*BackendTrafficPolicy"
+    description: "BackendTrafficPolicy resource kind"
+    weight: 1.5
+  - pattern: "api\\.example\\.com"
+    description: "Primary FQDN endpoint"
+    weight: 1
+  - pattern: "fallback-api\\.example\\.com"
+    description: "Fallback FQDN endpoint"
+    weight: 1
+  - pattern: "fqdn"
+    description: "Uses fqdn endpoint type"
+    weight: 1
+  - pattern: "hostname"
+    description: "Correct hostname field under fqdn"
+    weight: 1
+  - pattern: "circuitBreaker"
+    description: "Circuit breaker configuration"
+    weight: 1.5
+  - pattern: "maxConnections.*100|100.*maxConnections"
+    description: "maxConnections: 100"
+    weight: 1
+  - pattern: "maxPendingRequests.*50|50.*maxPendingRequests"
+    description: "maxPendingRequests: 50"
+    weight: 1
+  - pattern: "retry|Retry"
+    description: "Retry configuration present"
+    weight: 1
+  - pattern: "numRetries.*3|3.*numRetries"
+    description: "3 retry attempts"
+    weight: 1
+  - pattern: "5xx"
+    description: "Retry on 5xx"
+    weight: 1
+  - pattern: "gateway-error"
+    description: "Retry on gateway-error"
+    weight: 1
+  - pattern: "backOff|backoff|baseInterval|500ms"
+    description: "Exponential backoff from 500ms"
+    weight: 1
+
+structure_checks:
+  - type: "contains_code_block"
+    description: "Response includes YAML code blocks"
+  - type: "no_yaml_errors"
+    description: "All YAML blocks are syntactically valid"
+    applies_to: "yaml"
+  - type: "api_version"
+    description: "Correct apiVersion for Backend"
+    expected: "gateway.envoyproxy.io/v1alpha1"
+  - type: "kind"
+    description: "Backend kind present"
+    expected: "Backend"
+  - type: "kind"
+    description: "BackendTrafficPolicy kind present"
+    expected: "BackendTrafficPolicy"
+  - type: "required_field"
+    description: "Endpoints field present"
+    field: "spec.endpoints"
+  - type: "required_field"
+    description: "Circuit breaker field present"
+    field: "spec.circuitBreaker"
+
+judge_criteria: |
+  Evaluate the response for correct Envoy Gateway v1.3.0 YAML manifests.
+  Check:
+  1. Are there 3 manifests (2 Backends + 1 BackendTrafficPolicy)?
+  2. Do Backends use correct apiVersion (gateway.envoyproxy.io/v1alpha1)?
+  3. Do Backend endpoints use fqdn.hostname (not just host or address)?
+  4. Is port 443 specified correctly?
+  5. Does BackendTrafficPolicy have circuitBreaker with maxConnections and
+     maxPendingRequests?
+  6. Does retry config use retryOn.triggers (not retryOn directly)?
+  7. Is backoff configured with baseInterval: 500ms?
+  8. Does targetRefs (plural) reference the correct resource?
+  Score 1-5 where:
+    1 = Major structural errors, wrong apiVersion or kinds
+    2 = Correct kinds but wrong field names or nesting
+    3 = Mostly correct, minor field naming issues
+    4 = All manifests correct, small formatting differences
+    5 = Perfect manifests matching v1.3.0 source types exactly
+
+reference_answer_file: "tasks/02-codegen.reference.md"

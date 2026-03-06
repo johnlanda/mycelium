@@ -1,0 +1,73 @@
+task_id: "01-discovery"
+category: "knowledge_recall"
+version: 1
+
+required_facts:
+  - pattern: "OIDC|OpenID Connect"
+    description: "Mentions OIDC authentication"
+    weight: 1
+  - pattern: "JWT"
+    description: "Mentions JWT authentication"
+    weight: 1
+  - pattern: "BasicAuth|Basic Auth|basic authentication"
+    description: "Mentions basic authentication"
+    weight: 1
+  - pattern: "APIKey|ApiKey|API Key|apiKeyAuth"
+    description: "Mentions API key authentication"
+    weight: 2
+  - pattern: "ExtAuth|External Auth|extAuth"
+    description: "Mentions external authentication"
+    weight: 1
+  - pattern: "SecurityPolicySpec|SecurityPolicy"
+    description: "References the SecurityPolicy type"
+    weight: 1
+  - pattern: "CredentialRefs|credentialRefs"
+    description: "Mentions API key credential references"
+    weight: 1.5
+  - pattern: "ExtractFrom|extractFrom"
+    description: "Mentions API key extraction configuration"
+    weight: 1.5
+  - pattern: "headers.*params|params.*headers|Headers.*Params|Params.*Headers"
+    description: "Mentions multiple extraction sources"
+    weight: 1
+  - pattern: "[Cc]ookies?"
+    description: "Mentions cookie extraction for API keys"
+    weight: 1
+  - pattern: "Opaque [Ss]ecret|opaque secret"
+    description: "Mentions Opaque secret storage"
+    weight: 1
+  - pattern: "v1alpha1"
+    description: "References correct API version"
+    weight: 1
+  - pattern: "Authorization|authorization"
+    description: "Mentions authorization rules"
+    weight: 0.5
+  - pattern: "CORS|cors"
+    description: "Mentions CORS as part of SecurityPolicy"
+    weight: 0.5
+
+structure_checks:
+  - type: "contains_code_block"
+    description: "Response includes code blocks for type definitions"
+  - type: "no_yaml_errors"
+    description: "Any YAML blocks are syntactically valid"
+    applies_to: "yaml"
+
+judge_criteria: |
+  Evaluate the response for accuracy about Envoy Gateway v1.3.0
+  SecurityPolicy authentication methods. Check:
+  1. Are all authentication methods listed correctly (APIKeyAuth, BasicAuth,
+     JWT, OIDC, ExtAuth, Authorization, CORS)?
+  2. Are Go type names accurate (not hallucinated)?
+  3. Is the API key configuration explained with correct field names
+     (CredentialRefs, ExtractFrom with Headers/Params/Cookies)?
+  4. Is the explanation of Opaque secret storage for API keys correct?
+  5. Are extraction source details accurate (headers, query params, cookies)?
+  Score 1-5 where:
+    1 = Major factual errors or missing most methods
+    2 = Some methods listed but significant errors in details
+    3 = Most methods listed, minor errors in field names
+    4 = All methods listed, mostly correct field names
+    5 = Comprehensive and accurate, matches source documentation
+
+reference_answer_file: "tasks/01-discovery.reference.md"

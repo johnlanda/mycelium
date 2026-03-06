@@ -1,24 +1,83 @@
+---
 # BackendTrafficPolicy: Circuit breaking + retry with exponential backoff
+# Envoy Gateway v1.3.0
 apiVersion: gateway.envoyproxy.io/v1alpha1
 kind: BackendTrafficPolicy
 metadata:
   name: api-traffic-policy
   namespace: default
 spec:
+  # This policy can target Gateway, HTTPRoute, or GRPCRoute
+  # Adjust targetRefs based on your specific routing setup
   targetRefs:
     - group: gateway.networking.k8s.io
       kind: HTTPRoute
-      name: api-route
+      name: api-route  # Replace with your actual HTTPRoute name
+
+  # Circuit Breaker Configuration
+  # Limits connections and requests to prevent overwhelming the backend
   circuitBreaker:
+    # Maximum number of connections that Envoy will establish to the backend
+    # When this threshold is met, new connections will not be established
+    # and some requests will be queued until an existing connection becomes available
     maxConnections: 100
+
+    # Maximum number of pending requests (requests queued waiting for a connection)
+    # When this threshold is met, overflowing requests will be terminated with 503
     maxPendingRequests: 50
+
+    # Maximum number of parallel requests (concurrent in-flight requests)
+    # When this threshold is met, requests will be queued
+    # Default is 1024 if not specified
+    maxParallelRequests: 1024
+
+    # Maximum number of parallel retries
+    # Default is 1024 if not specified
+    maxParallelRetries: 1024
+
+  # Retry Configuration
+  # Retries enhance service availability by handling transient failures
   retry:
+    # Number of retry attempts (in addition to the initial request)
     numRetries: 3
+
+    # Retry trigger conditions
     retryOn:
+      # Triggers specify when retries should occur
       triggers:
-        - "5xx"
-        - "gateway-error"
+        - 5xx              # Retry on any 5xx response (includes connect-failure and refused-stream)
+        - gateway-error    # Retry on gateway errors (502, 503, 504)
+        - connect-failure  # Connection failure to upstream (connect timeout, etc.)
+        - refused-stream   # Upstream server resets stream with REFUSED_STREAM
+        - reset            # Upstream does not respond at all (disconnect/reset/read timeout)
+        - retriable-status-codes  # Retry on specific HTTP status codes (configured below)
+
+      # HTTP status codes that trigger retries
+      # Requires 'retriable-status-codes' trigger to be set above
+      httpStatusCodes:
+        - 503  # Service Unavailable
+        - 504  # Gateway Timeout
+
+    # Per-retry policy configuration
+    # Applied to each individual retry attempt
     perRetry:
+      # Timeout for each individual retry attempt
+      timeout: 10s
+
+      # Exponential backoff configuration
+      # Envoy uses a fully jittered exponential back-off algorithm
       backOff:
+        # Base interval for exponential backoff
+        # First retry waits approximately baseInterval (with jitter)
         baseInterval: 500ms
-        maxInterval: 5s
+
+        # Maximum interval between retries (caps exponential growth)
+        # Default is 10 times the base_interval if not specified
+        #
+        # With baseInterval=500ms and numRetries=3, intervals will be approximately:
+        # - 1st retry: ~500ms (baseInterval * jitter)
+        # - 2nd retry: ~1000ms (baseInterval * 2 * jitter)
+        # - 3rd retry: ~2000ms (baseInterval * 4 * jitter)
+        #
+        # Jitter is applied for each retry to prevent thundering herd
+        maxInterval: 10s

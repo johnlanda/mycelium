@@ -37,7 +37,14 @@ var serveCmd = &cobra.Command{
 		}
 		defer st.Close()
 
-		srv := mcpserver.NewServer(st, cachedEmb, mcpserver.WithCache(mcpserver.CacheConfig{}))
+		// Fetch source metadata to enrich tool descriptions.
+		var serverOpts []mcpserver.ServerOption
+		serverOpts = append(serverOpts, mcpserver.WithCache(mcpserver.CacheConfig{}))
+		if sources, err := st.ListSources(cmd.Context()); err == nil && len(sources) > 0 {
+			serverOpts = append(serverOpts, mcpserver.WithSourceContext(sources))
+		}
+
+		srv := mcpserver.NewServer(st, cachedEmb, serverOpts...)
 		return srv.Serve(cmd.Context())
 	},
 }

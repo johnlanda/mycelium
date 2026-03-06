@@ -1,0 +1,90 @@
+# ClientTrafficPolicy for Envoy Gateway v1.3.0
+# Configures downstream client connection behavior for Gateway "eg"
+#
+# Go Package: github.com/envoyproxy/gateway/api/v1alpha1
+# API Group: gateway.envoyproxy.io/v1alpha1
+# Kind: ClientTrafficPolicy
+
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: ClientTrafficPolicy
+metadata:
+  name: eg-client-policy
+  namespace: default
+spec:
+  # Target Gateway resource
+  # Go type: []gwapiv1a2.LocalPolicyTargetReferenceWithSectionName
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: eg
+
+  # Enable HTTP/3 protocol support
+  # Go type: *egv1a1.HTTP3Settings
+  # Field: HTTP3
+  http3: {}
+
+  # Header handling configuration
+  # Go type: *egv1a1.HeaderSettings
+  # Field: Headers
+  headers:
+    # X-Forwarded-Client-Cert (XFCC) header configuration
+    # Go type: *egv1a1.XForwardedClientCert
+    # Field: XForwardedClientCert
+    xForwardedClientCert:
+      # Forward mode for client certificate details
+      # Go type: egv1a1.XFCCForwardMode
+      # Field: Mode
+      # Enum values: Sanitize | AppendForward | SanitizeSet | AlwaysForwardOnly
+      mode: SanitizeSet
+
+      # Certificate details to include in XFCC header
+      # Go type: []egv1a1.XFCCCertData
+      # Field: CertDetailsToAdd
+      # Enum values: Subject | Cert | Chain | DNS | URI
+      certDetailsToAdd:
+        - Subject
+        - DNS
+        - URI
+
+    # Action for HTTP headers containing underscores
+    # Go type: *egv1a1.WithUnderscoresAction
+    # Field: WithUnderscoresAction
+    # Enum values: Allow | RejectRequest | DropHeader
+    withUnderscoresAction: RejectRequest
+
+    # Disable X-RateLimit-* response headers from Envoy
+    # Go type: *bool
+    # Field: DisableRateLimitHeaders
+    # true = headers disabled, false = headers enabled
+    disableRateLimitHeaders: true
+
+    # Early request header modification (before routing/tracing)
+    # Go type: *egv1a1.HeaderModifier
+    # Field: EarlyRequestHeaders
+    earlyRequestHeaders:
+      # Set headers to add/replace
+      # Go type: []egv1a1.AddHeader
+      # Field: Set
+      set:
+        - name: X-Request-Start
+          # Envoy command operator: %START_TIME% expands to request start time
+          value: "%START_TIME%"
+
+  # TCP keepalive configuration for downstream connections
+  # Go type: *egv1a1.TCPKeepalive
+  # Field: TCPKeepalive
+  tcpKeepalive:
+    # Idle time before sending first keepalive probe
+    # Go type: *gwapiv1.Duration
+    # Field: IdleTime
+    idleTime: 60s
+
+    # Interval between keepalive probes
+    # Go type: *gwapiv1.Duration
+    # Field: Interval
+    interval: 30s
+
+    # Number of unacknowledged probes before connection is dead
+    # Go type: *uint32
+    # Field: Probes
+    probes: 3

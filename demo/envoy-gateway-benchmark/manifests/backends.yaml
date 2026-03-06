@@ -1,4 +1,5 @@
-# Backend: Primary API endpoint (FQDN-based)
+---
+# Primary Backend - routes to api.example.com:443 via FQDN endpoint
 apiVersion: gateway.envoyproxy.io/v1alpha1
 kind: Backend
 metadata:
@@ -9,8 +10,13 @@ spec:
     - fqdn:
         hostname: api.example.com
         port: 443
+  # Optional: Specify application protocols if needed
+  # appProtocols:
+  #   - gateway.envoyproxy.io/h2c  # HTTP/2 Cleartext
+  #   - gateway.envoyproxy.io/ws   # WebSocket over HTTP
+  #   - gateway.envoyproxy.io/wss  # WebSocket over HTTPS
 ---
-# Backend: Fallback API endpoint (FQDN-based)
+# Fallback Backend - routes to fallback-api.example.com:443 via FQDN endpoint
 apiVersion: gateway.envoyproxy.io/v1alpha1
 kind: Backend
 metadata:
@@ -21,3 +27,10 @@ spec:
     - fqdn:
         hostname: fallback-api.example.com
         port: 443
+  # Mark this backend as a fallback
+  # Fallback backends receive traffic when active backend health falls below 72%
+  # (overprovisioning factor is 1.4)
+  fallback: true
+  # Optional: Specify application protocols if needed
+  # appProtocols:
+  #   - gateway.envoyproxy.io/h2c

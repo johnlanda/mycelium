@@ -1,0 +1,34 @@
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: ClientTrafficPolicy
+metadata:
+  name: example-ctp
+  namespace: default
+spec:
+  targetRef:
+    group: gateway.networking.k8s.io
+    kind: Gateway
+    name: eg
+
+  http3: {}
+
+  headers:
+    xForwardedClientCert:
+      mode: SanitizeSet
+      certDetailsToAdd:
+        - Subject
+        - Cert
+        - DNS
+
+    withUnderscoresAction: RejectRequest
+
+    disableRateLimitHeaders: true
+
+    earlyRequestHeaders:
+      set:
+        - name: X-Request-Start
+          value: "%START_TIME%"
+
+  tcpKeepalive:
+    idleTime: 60s
+    interval: 30s
+    probes: 3

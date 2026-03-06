@@ -136,17 +136,12 @@ func (ls *LanceDBStore) Search(ctx context.Context, query []float32, opts Search
 		topK = 10
 	}
 
-	count, err := ls.table.Count(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("count rows: %w", err)
-	}
-	if count == 0 {
-		return nil, nil
-	}
-
 	filter := buildSQLFilter(opts)
 
-	var rows []map[string]interface{}
+	var (
+		rows []map[string]interface{}
+		err  error
+	)
 	if filter != "" {
 		rows, err = ls.table.VectorSearchWithFilter(ctx, "vector", query, topK, filter)
 	} else {
@@ -161,14 +156,6 @@ func (ls *LanceDBStore) Search(ctx context.Context, query []float32, opts Search
 
 // Delete removes all chunks with the given storeKey.
 func (ls *LanceDBStore) Delete(ctx context.Context, storeKey string) error {
-	count, err := ls.table.Count(ctx)
-	if err != nil {
-		return fmt.Errorf("count rows: %w", err)
-	}
-	if count == 0 {
-		return nil
-	}
-
 	if err := ls.table.Delete(ctx, fmt.Sprintf("store_key = '%s'", escapeSQLString(storeKey))); err != nil {
 		return fmt.Errorf("delete: %w", err)
 	}
@@ -177,14 +164,6 @@ func (ls *LanceDBStore) Delete(ctx context.Context, storeKey string) error {
 
 // HasKey returns true if any chunks exist with the given storeKey.
 func (ls *LanceDBStore) HasKey(ctx context.Context, storeKey string) (bool, error) {
-	count, err := ls.table.Count(ctx)
-	if err != nil {
-		return false, fmt.Errorf("count rows: %w", err)
-	}
-	if count == 0 {
-		return false, nil
-	}
-
 	one := 1
 	results, err := ls.table.Select(ctx, contracts.QueryConfig{
 		Columns: []string{"store_key"},
@@ -199,14 +178,6 @@ func (ls *LanceDBStore) HasKey(ctx context.Context, storeKey string) (bool, erro
 
 // ListSources returns information about all indexed sources.
 func (ls *LanceDBStore) ListSources(ctx context.Context) ([]SourceInfo, error) {
-	count, err := ls.table.Count(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("count rows: %w", err)
-	}
-	if count == 0 {
-		return nil, nil
-	}
-
 	rows, err := ls.table.SelectWithColumns(ctx, []string{"source", "source_version", "store_key"})
 	if err != nil {
 		return nil, fmt.Errorf("list sources: %w", err)
